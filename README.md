@@ -67,7 +67,7 @@ uv run python scripts/run_evaluation.py --live-agent-only --repeats 3 \
 uv run python scripts/run_red_team.py --attackers fireworks:high,meta:high
 ```
 
-Reports: [`evaluation.md`](artifacts/reports/evaluation.md) and [`redteam.md`](artifacts/reports/redteam.md) (the pre-fix baseline is in [`redteam_v1.md`](artifacts/reports/redteam_v1.md)).
+Reports: [`evaluation.md`](artifacts/reports/evaluation.md), plus one red-team report per verifier version: [`redteam_v1.md`](artifacts/reports/redteam_v1.md), [`redteam_v2.md`](artifacts/reports/redteam_v2.md) and [`redteam_v3.md`](artifacts/reports/redteam_v3.md). A new red-team run writes `redteam.md`.
 
 ### Docker Compose
 
@@ -122,7 +122,23 @@ From the last committed report (synthetic held-out seeds; see the report for ful
 
 - Calibrated XGBoost 15-min failure risk: high PR-AUC with low FPR vs alarm/z-score baselines  
 - Closed-loop policies: Foresight estimated/oracle reduce simulated failures vs no-action  
-- Live Meta agent eval (`muse-spark-1.3`, 6 runs across the three fault cases): all runs completed, with 0 invalid actions and 0 invented evidence ids. Mean regret against the deterministic planner was about −$17 under the simulator's cost model, at about $0.35 of API usage. See section 6 of the report for the per-run table.
+- Closed loop (20 held-out episodes): Foresight had 0/20 failures against 10/20 with no action, with a mean episode cost of $1,760 against $16,835. It intervened in no healthy episode.
+- **Provider comparison** (126 live runs; Meta Muse Spark 1.3 vs Fireworks Muse Spark Open at low, medium and high effort; 7 cases × 3 repeats; verifier v2; $5.65). Regret is the agent's chosen action against the deterministic planner's, scored in one shared audit ensemble:
+  - Meta's mean regret was +$3, −$4 and −$21 at low, medium and high. At high effort the 95% CI was [−$50, $0], and no run was worse than the planner.
+  - Fireworks' mean regret was +$328, +$131 and +$121: it picks costlier actions.
+  - In 4–6 of 21 runs per arm, Meta ended without a verified submission and the optimizer chose instead. Fireworks never needed that fallback, but 3 of its 63 runs hit the 300-second agent time limit.
+  - Across all arms: 0 unsafe picks, 0 interventions on the healthy case, 0 invented evidence ids.
+- **Re-check on verifier v3** (28 runs, both providers at high effort, $1.64): 28/28 completed, 0 unsafe picks, 0 healthy false alarms. Mean regret was +$0.70 for Meta and +$46 for Fireworks; both CIs include 0.
+- **Verifier red-team.** Fireworks and Meta acted as white-box attackers: 3 adaptive rounds over 7 cases, with a random fuzzer as control. About $5 across three verifier versions.
+
+  | Verifier | Attempts | Hard escapes | "Worse than nothing" / healthy escapes |
+  |---|---|---|---|
+  | v1 | 265 | 0 | 31 / 38 |
+  | v2 | 264 | 1 | 0 / 12 |
+  | v3 | 370 | 2 | 0 / 0 |
+
+  Each round found a subtler hole, and each was fixed (see [architecture](docs/architecture.md#5-verification-foresightverification)). The v3 hard escapes led to the v4 fix, which is in code but not yet red-teamed.
+- Section 6 of the report has the full tables.
 
 Do not treat simulator metrics as real-plant performance.
 
