@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. The neutral and status scales are remapped onto Tailwind's
+ * slate / cyan / violet / emerald / amber / rose / sky names so every
+ * component picks up the same restrained palette.
+ */
+@theme {
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SFMono-Regular", monospace;
+
+  /* Warm graphite neutrals */
+  --color-slate-50: #f5f5f3;
+  --color-slate-100: #e8e8e5;
+  --color-slate-200: #d3d3cf;
+  --color-slate-300: #b3b3ae;
+  --color-slate-400: #8f8f8a;
+  --color-slate-500: #6f6f6b;
+  --color-slate-600: #52524f;
+  --color-slate-700: #3a3a3c;
+  --color-slate-800: #27272a;
+  --color-slate-900: #18181b;
+  --color-slate-950: #0f0f11;
+
+  /* Accent: instrument blue */
+  --color-cyan-50: #eef3ff;
+  --color-cyan-100: #dce6ff;
+  --color-cyan-200: #bccfff;
+  --color-cyan-300: #95b2ff;
+  --color-cyan-400: #7096fa;
+  --color-cyan-500: #5079ec;
+  --color-cyan-600: #3e60d0;
+
+  /* Model output (ML / LLM): muted lavender */
+  --color-violet-100: #ebe8f7;
+  --color-violet-200: #d6d1ef;
+  --color-violet-300: #bcb4e2;
+  --color-violet-400: #9e94d2;
+  --color-violet-500: #8075bd;
+  --color-violet-600: #675ca3;
+
+  /* Status */
+  --color-emerald-100: #dcf3e8;
+  --color-emerald-200: #b6e5cf;
+  --color-emerald-300: #8cd4b1;
+  --color-emerald-400: #5fbf93;
+  --color-emerald-500: #42a379;
+  --color-emerald-600: #348462;
+
+  --color-amber-100: #f8ecd4;
+  --color-amber-200: #f0d6a6;
+  --color-amber-300: #e6c07c;
+  --color-amber-400: #dba552;
+  --color-amber-500: #c48b34;
+  --color-amber-600: #a06f27;
+
+  --color-rose-100: #f9dedd;
+  --color-rose-200: #f2bdbb;
+  --color-rose-300: #eb9c99;
+  --color-rose-400: #e2716d;
+  --color-rose-500: #d4534f;
+  --color-rose-600: #b2403d;
+
+  --color-sky-100: #e2ecf6;
+  --color-sky-200: #c4d7ec;
+  --color-sky-300: #a3c0df;
+  --color-sky-400: #7ea5cf;
+  --color-sky-500: #5f8abb;
+  --color-sky-600: #4a709c;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-slate-950);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "tnum" 0;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-cyan-400) 35%, transparent);
+}
+
+.recharts-legend-item-text {
+  color: var(--color-slate-400) !important;
+}
+
+.recharts-cartesian-axis-tick-value {
+  font-family: var(--font-mono);
+}
