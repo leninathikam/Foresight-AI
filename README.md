@@ -18,6 +18,36 @@ Built for the **Meta Global AI Developer Hackathon 2026** (Indie / Push the Fron
 4. **Independent safety verifier** that can reject LLM or planner proposals  
 5. **Bounded Meta agent** with typed tools; it cannot invent sensor readings or simulation results  
 
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph Web["Next.js UI"]
+        UI["Mission Control · Futures Lab<br/>Agent · Evidence · Diagnostics"]
+    end
+    subgraph API["FastAPI"]
+        S["Sessions + SSE"]
+        K[("API keys<br/>server-side")]
+    end
+    subgraph Core["foresight core"]
+        TW["Digital twin<br/>15 kW motor"] --> RK["Risk models<br/>IF · CUSUM · XGBoost"]
+        RK --> AG["Bounded agent"]
+        AG -- "typed tools" --> FB["Future Branching"]
+        FB --> VF{{"Safety verifier"}}
+        AG -. fallback .-> PL["Deterministic planner"]
+    end
+    LLM["Muse Spark<br/>Meta API · Fireworks"]
+
+    UI <-->|"REST + SSE"| S
+    S --> TW
+    K -.-> AG
+    AG <--> LLM
+    VF -- "accepted" --> HA["Operator approval"]
+    HA -- "intervention" --> TW
+```
+
+The model only reasons over numbers returned by local tools, and every proposal must pass the deterministic verifier and an operator approval before it touches the (simulated) motor. More diagrams, including one agent run, the verifier decision tree and the red-team loop, are in [`docs/architecture.md`](docs/architecture.md).
+
 ## Quick start (local)
 
 ### Prerequisites
