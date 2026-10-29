@@ -311,8 +311,28 @@ export interface RejectedProposal {
   verification: VerificationResult;
 }
 
+export interface TrendEvidence {
+  name: "cooling_fouling" | "bearing_growth" | "load_ramp";
+  value_per_h: number;
+  se_per_h: number | null;
+  t_stat: number | null;
+  drives_forecast: boolean;
+  supported: boolean;
+}
+
+export interface InformationAssessment {
+  decision: "act_now" | "gather_information";
+  defer_minutes: number;
+  trends: TrendEvidence[];
+  unsupported_trends: string[];
+  without_unsupported: Record<string, number> | null;
+  waiting: Record<string, number | null> | null;
+  reasons: string[];
+  summary: string;
+}
+
 export interface AgentRecommendation {
-  status: "awaiting_approval" | "no_action_needed" | "no_safe_action_found";
+  status: "awaiting_approval" | "gather_information" | "no_action_needed" | "no_safe_action_found";
   action: Action | null;
   action_label: string;
   claimed_failure_mode: string;
@@ -324,6 +344,7 @@ export interface AgentRecommendation {
   baseline: BranchOutcome | null;
   comparison_id: string | null;
   selected_by: "agent" | "optimizer_fallback" | "deterministic_planner";
+  information: InformationAssessment | null;
 }
 
 export interface AgentUsage {

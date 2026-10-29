@@ -76,6 +76,15 @@ def test_rule_policy_prevents_overload_failure(small_bundle):
     assert rule.cost_total <= none.cost_total
 
 
+def test_ml_only_baseline_inspects_on_risk_without_simulation(small_bundle):
+    r = run_policy_episode(
+        ScenarioId.OVERLOAD, 2001, "ml_inspect_on_risk", small_bundle, Settings(MODEL_API_KEY=None)
+    )
+    assert r.interventions
+    assert all(i["action"]["type"] == "schedule_inspection" for i in r.interventions)
+    assert r.agent_runs == []
+
+
 def test_live_agent_eval_is_not_faked_without_key(small_bundle):
     out = live_agent_metrics(small_bundle, Settings(MODEL_API_KEY=None), run=True)
     assert out["status"] == "not_run"

@@ -41,6 +41,11 @@ that avoids failure at the lowest expected cost. If the verifier rejects your pr
 failed checks and revise.
 9. Independent tool calls (for example several sensor histories) should be requested together \
 in one turn.
+10. A trend fitted on little data can look alarming by chance. assess_information_value tests \
+whether the risk rests on trends the telemetry does not yet support and whether waiting is safe. \
+A deterministic gate runs it on every verified intervention: if waiting is safe and the evidence \
+is weak, your verified action is held back while more data is gathered. Still submit the best \
+verified action.
 """
 
 HYPOTHESIS_TASK = """\
@@ -214,6 +219,16 @@ TOOL_DEFINITIONS: list[dict] = [
             },
             "required": ["actions"],
         },
+    },
+    {
+        "type": "function",
+        "name": "assess_information_value",
+        "description": (
+            "Statistical support (t-statistic of each fitted trend: cooling fouling, bearing damage "
+            "growth, load ramp) and whether waiting 15 min for more telemetry is safe. Returns "
+            "act_now or gather_information with reasons."
+        ),
+        "parameters": {"type": "object", "properties": {}},
     },
     {
         "type": "function",

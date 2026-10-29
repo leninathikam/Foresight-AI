@@ -50,7 +50,7 @@ from foresight.simulation import (
     ScheduleInspection,
     describe_action,
 )
-from foresight.verification import Proposal, VerificationResult
+from foresight.verification import InformationAssessment, Proposal, VerificationResult
 
 log = logging.getLogger("foresight.agent")
 
@@ -61,6 +61,7 @@ TOOL_STAGE = {
     "predict_failure_risk": AgentStage.INVESTIGATE,
     "inspect_visual_evidence": AgentStage.INVESTIGATE,
     "compare_futures": AgentStage.SIMULATE,
+    "assess_information_value": AgentStage.VERIFY,
     "verify_intervention": AgentStage.VERIFY,
     "submit_recommendation": AgentStage.VERIFY,
 }
@@ -77,12 +78,14 @@ DETERMINISTIC_CANDIDATES: dict[str, list[Action]] = {
         IncreaseCooling(boost=0.4),
         ReduceLoad(fraction=0.3),
         ScheduleInspection(delay_minutes=10),
+        ScheduleInspection(delay_minutes=0),
         ControlledShutdown(),
     ],
     "bearing": [
         ReduceLoad(fraction=0.3),
         ReduceSpeed(fraction=0.3),
         ScheduleInspection(delay_minutes=10),
+        ScheduleInspection(delay_minutes=0),
         ControlledShutdown(),
     ],
     "overload": [
@@ -260,8 +263,23 @@ class AgentOrchestrator:
         else:
             self._deterministic_hypotheses()
             accepted = await self._optimizer_fallback(selected_by="deterministic_planner")
-        self._recommend(accepted)
+        information = await self._information_gate(accepted)
+        self._recommend(accepted, information)
         self._finish()
+
+    async def _information_gate(
+        self, accepted: tuple[VerificationResult, Proposal, str] | None
+    ) -> InformationAssessment | None:
+        """Ask whether a verified consequential action should wait for more telemetry."""
+        if (
+            accepted is None
+            or not self.snapshot.information_gathering
+            or self.snapshot.planning_state_source == "oracle"
+            or isinstance(accepted[1].action, ContinueOperation)
+        ):
+            return None
+        ok, _, _ = await self._tool("assess_information_value", {})
+        return self.tools.information if ok else None
 
     # ------------------------------------------------------------------ LLM path
     def _evidence_package(self) -> dict:
@@ -599,7 +617,11 @@ class AgentOrchestrator:
         return None
 
     # ------------------------------------------------------------------ recommend
-    def _recommend(self, accepted: tuple[VerificationResult, Proposal, str] | None) -> None:
+    def _recommend(
+        self,
+        accepted: tuple[VerificationResult, Proposal, str] | None,
+        information: InformationAssessment | None = None,
+    ) -> None:
         if self.trace.stage != AgentStage.VERIFY:
             self._transition(AgentStage.VERIFY)
         self._transition(AgentStage.RECOMMEND)
@@ -631,10 +653,18 @@ class AgentOrchestrator:
             self.tools.evidence[e] for e in proposal.cited_evidence_ids if e in self.tools.evidence
         ]
         is_continue = isinstance(proposal.action, ContinueOperation)
+        label = describe_action(proposal.action)
+        status = "no_action_needed" if is_continue else "awaiting_approval"
+        if information is not None and information.decision == "gather_information":
+            status = "gather_information"
+            rationale = (
+                f"{information.summary} Held back: '{label}' passed verification and can be "
+                f"re-assessed after {information.defer_minutes:.0f} min. {rationale}"
+            ).strip()
         self.trace.recommendation = AgentRecommendation(
-            status="no_action_needed" if is_continue else "awaiting_approval",
+            status=status,  # type: ignore[arg-type]
             action=ACTION_ADAPTER.dump_python(proposal.action, mode="json"),
-            action_label=describe_action(proposal.action),
+            action_label=label,
             claimed_failure_mode=proposal.claimed_failure_mode,
             rationale=rationale,
             rationale_source="llm" if proposal.source == "agent" else "deterministic",
@@ -644,6 +674,7 @@ class AgentOrchestrator:
             baseline=baseline,
             comparison_id=comp.id if comp else None,
             selected_by=selected_by,  # type: ignore[arg-type]
+            information=information,
         )
 
     def _finish(self) -> None:
@@ -674,6 +705,11 @@ class AgentOrchestrator:
                 v.model_dump(include={"verdict", "action_label", "rejection_reasons", "summary"})
                 for v in self.tools.verifications
             ],
+            "information_value": self.tools.information.model_dump(
+                include={"decision", "unsupported_trends", "reasons", "summary"}
+            )
+            if self.tools.information
+            else None,
             "recommendation": rec.model_dump(
                 include={
                     "status",

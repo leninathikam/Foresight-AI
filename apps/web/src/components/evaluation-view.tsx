@@ -125,6 +125,49 @@ interface RedTeamReport {
   random_fuzz: RedTeamAttacker;
 }
 
+interface ClosedLoop {
+  seeds: number[];
+  scenarios: string[];
+  episode_hours: number;
+  policy_notes: Record<string, string>;
+  approval_note: string;
+  by_policy: Record<string, { overall: PolicySummary; by_scenario: Record<string, PolicySummary>; healthy_episodes_with_intervention: number }>;
+  paired_vs_no_action: Record<string, { mean_cost_change_vs_no_action: number; episodes_cheaper: number; episodes_costlier: number }>;
+}
+
+interface CalibrationSummary {
+  branches: number;
+  brier: number;
+  brier_reference_state: number;
+  brier_base_rate: number;
+  predicted_safe_branches: number;
+  false_safe_branches: number;
+  false_safe_mean_true_failure_rate: number | null;
+  peak_temperature_p10_p90_coverage: number;
+  peak_temperature_median_abs_error_k: number;
+  decisions: number;
+  decision_matches_reference_best: number;
+  decision_regret_mean_usd: number;
+  decision_regret_max_usd: number;
+}
+
+interface Counterfactual {
+  seeds: number[];
+  decision_minutes: number[];
+  actions: string[];
+  members: number;
+  reference: string;
+  decision_points: number;
+  modes: Record<
+    string,
+    {
+      overall: CalibrationSummary;
+      by_fault_state?: Record<string, Partial<CalibrationSummary>>;
+      false_safe_cases: { case: string; action: string; true_failure_rate: number; fault_state?: string }[];
+    }
+  >;
+}
+
 interface Evaluation {
   generated_at: string;
   git_commit: string | null;
@@ -145,16 +188,11 @@ interface Evaluation {
     };
     latency: { per_assessment_ms_p50: number; per_assessment_ms_p95: number; scope: string };
   };
-  interventions: {
-    seeds: number[];
-    scenarios: string[];
-    episode_hours: number;
-    policy_notes: Record<string, string>;
-    approval_note: string;
-    by_policy: Record<string, { overall: PolicySummary; by_scenario: Record<string, PolicySummary>; healthy_episodes_with_intervention: number }>;
-    paired_vs_no_action: Record<string, { mean_cost_change_vs_no_action: number; episodes_cheaper: number; episodes_costlier: number }>;
-  };
-  agent: { deterministic: AgentMetrics; live: LiveEval; live_recheck?: LiveEval };
+  interventions: ClosedLoop;
+  interventions_confirmation?: (ClosedLoop & { note: string }) | null;
+  interventions_holdout?: (ClosedLoop & { note: string }) | null;
+  counterfactual?: Counterfactual | null;
+  agent: { deterministic: AgentMetrics; live: LiveEval; live_recheck?: LiveEval; live_v4?: LiveEval };
   limitations: string[];
 }
 
@@ -172,7 +210,9 @@ const POLICY_LABEL: Record<string, string> = {
   rule_derate: "Rule: derate on alarm",
   rule_shutdown_on_alarm: "Rule: shutdown on alarm",
   rule_inspect_on_alarm: "Rule: inspect on alarm",
+  ml_inspect_on_risk: "ML risk → inspect (no simulation)",
   foresight_estimated: "Foresight (estimated state)",
+  foresight_active: "Foresight + information gate",
   foresight_oracle: "Foresight (oracle state)",
 };
 
@@ -417,40 +457,9 @@ export function EvaluationView() {
 
       <Card
         title="Closed-loop intervention outcomes"
-        subtitle={`${iv.scenarios.length} scenarios × ${iv.seeds.length} held-out seeds × ${iv.episode_hours} h per episode. ${iv.approval_note}`}
+        subtitle={`${iv.scenarios.length} scenarios × ${iv.seeds.length} held-out seeds (${iv.seeds[0]}–${iv.seeds[iv.seeds.length - 1]}) × ${iv.episode_hours} h per episode. ${iv.approval_note}`}
       >
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-left">
-            <thead>
-              <tr>
-                <Th>Policy</Th>
-                <Th right>Failures</Th>
-                <Th right>95% CI</Th>
-                <Th right>Mean cost</Th>
-                <Th right>Δ vs no action</Th>
-                <Th right>Downtime</Th>
-                <Th right>Interventions</Th>
-                <Th right>Healthy eps touched</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {policies.map(([p, b]) => (
-                <tr key={p}>
-                  <Td strong={p.startsWith("foresight")}>
-                    <span title={iv.policy_notes[p]}>{POLICY_LABEL[p] ?? p}</span>
-                  </Td>
-                  <Td right>{b.overall.failures}/{b.overall.episodes}</Td>
-                  <Td right>{num(b.overall.failure_rate_ci95[0], 2)}–{num(b.overall.failure_rate_ci95[1], 2)}</Td>
-                  <Td right>{usd(b.overall.cost_mean)}</Td>
-                  <Td right>{iv.paired_vs_no_action[p] ? usd(iv.paired_vs_no_action[p].mean_cost_change_vs_no_action) : "—"}</Td>
-                  <Td right>{num(b.overall.downtime_h_mean, 2)} h</Td>
-                  <Td right>{num(b.overall.interventions_mean, 2)}</Td>
-                  <Td right>{b.healthy_episodes_with_intervention}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <PolicyTable iv={iv} />
         <div className="mt-5">
           <div className="mb-1 text-xs text-slate-400">Mean episode cost by scenario (USD, lower is better)</div>
           <SimpleBarChart
@@ -462,7 +471,7 @@ export function EvaluationView() {
             bars={policies.map(([p], i) => ({
               key: p,
               name: POLICY_LABEL[p] ?? p,
-              color: ["#52524f", "#8f8f8a", "#d3d3cf", PALETTE.thermal, PALETTE.accent, PALETTE.model][i % 6],
+              color: ["#3f3f3c", "#52524f", "#8f8f8a", "#d3d3cf", "#b08968", PALETTE.thermal, PALETTE.accent, PALETTE.model][i % 8],
             }))}
             yFormatter={(v) => `$${Math.round(v / 100) / 10}k`}
           />
@@ -475,6 +484,13 @@ export function EvaluationView() {
           ))}
         </ul>
       </Card>
+
+      {ev.interventions_confirmation && (
+        <SeedBlockCard title="Confirmation on further test seeds" iv={ev.interventions_confirmation} />
+      )}
+      {ev.interventions_holdout && <SeedBlockCard title="Final hold-out seeds" iv={ev.interventions_holdout} />}
+
+      {ev.counterfactual && <CounterfactualCard cf={ev.counterfactual} />}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card title="Agent reliability" subtitle={ev.agent.deterministic.provider ? `Provider: ${ev.agent.deterministic.provider}` : undefined}>
@@ -530,8 +546,160 @@ export function EvaluationView() {
       {ev.agent.live_recheck?.arms && (
         <LiveArmsCard title="Re-check after verifier fixes" live={ev.agent.live_recheck} />
       )}
+      {ev.agent.live_v4?.arms && (
+        <LiveArmsCard title="Re-check on verifier v4 with the information gate" live={ev.agent.live_v4} />
+      )}
       <RedTeamCard />
     </div>
+  );
+}
+
+function PolicyTable({ iv }: { iv: ClosedLoop }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[820px] text-left">
+        <thead>
+          <tr>
+            <Th>Policy</Th>
+            <Th right>Failures</Th>
+            <Th right>95% CI</Th>
+            <Th right>Mean cost</Th>
+            <Th right>Δ vs no action</Th>
+            <Th right>Downtime</Th>
+            <Th right>Interventions</Th>
+            <Th right>Healthy eps touched</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(iv.by_policy).map(([p, b]) => (
+            <tr key={p}>
+              <Td strong={p.startsWith("foresight")}>
+                <span title={iv.policy_notes[p]}>{POLICY_LABEL[p] ?? p}</span>
+              </Td>
+              <Td right>{b.overall.failures}/{b.overall.episodes}</Td>
+              <Td right>{num(b.overall.failure_rate_ci95[0], 2)}–{num(b.overall.failure_rate_ci95[1], 2)}</Td>
+              <Td right>{usd(b.overall.cost_mean)}</Td>
+              <Td right>{iv.paired_vs_no_action[p] ? usd(iv.paired_vs_no_action[p].mean_cost_change_vs_no_action) : "—"}</Td>
+              <Td right>{num(b.overall.downtime_h_mean, 2)} h</Td>
+              <Td right>{num(b.overall.interventions_mean, 2)}</Td>
+              <Td right>{b.healthy_episodes_with_intervention}</Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SeedBlockCard({ title, iv }: { title: string; iv: ClosedLoop & { note: string } }) {
+  return (
+    <Card
+      title={title}
+      subtitle={`${iv.seeds.length} seeds (${iv.seeds[0]}–${iv.seeds[iv.seeds.length - 1]}) × ${iv.scenarios.length} scenarios`}
+    >
+      <p className="mb-3 text-[12px] leading-relaxed text-slate-400">{iv.note}</p>
+      <PolicyTable iv={iv} />
+    </Card>
+  );
+}
+
+const FAULT_STATE_LABEL: Record<string, string> = {
+  no_fault: "No fault",
+  latent: "Latent (not started yet)",
+  active: "Active fault",
+};
+
+function CounterfactualCard({ cf }: { cf: Counterfactual }) {
+  const modes = Object.entries(cf.modes);
+  const byState = Object.entries(cf.modes.fixed?.by_fault_state ?? {}).filter(([, v]) => v.decisions);
+  return (
+    <Card
+      title="Counterfactual calibration"
+      subtitle={`${cf.decision_points} held-out decision points · estimated-state ensemble (${cf.members} members) vs the hidden true process`}
+    >
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[900px] text-left">
+          <thead>
+            <tr>
+              <Th>Trend uncertainty</Th>
+              <Th right>Branches</Th>
+              <Th right>Brier</Th>
+              <Th right>Brier (true state)</Th>
+              <Th right>Predicted safe → fails</Th>
+              <Th right>Peak-T 10–90 % coverage</Th>
+              <Th right>Peak-T |error|</Th>
+              <Th right>Best action matched</Th>
+              <Th right>Decision regret mean / max</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {modes.map(([mode, m]) => (
+              <tr key={mode}>
+                <Td strong>{mode === "fixed" ? "Fixed spread (planner)" : "Fit standard error"}</Td>
+                <Td right>{m.overall.branches}</Td>
+                <Td right>{num(m.overall.brier, 3)}</Td>
+                <Td right>{num(m.overall.brier_reference_state, 3)}</Td>
+                <Td right>
+                  {m.overall.false_safe_branches}/{m.overall.predicted_safe_branches}
+                </Td>
+                <Td right>{num(m.overall.peak_temperature_p10_p90_coverage * 100, 0)}%</Td>
+                <Td right>{num(m.overall.peak_temperature_median_abs_error_k, 1)} K</Td>
+                <Td right>
+                  {m.overall.decision_matches_reference_best}/{m.overall.decisions}
+                </Td>
+                <Td right>
+                  {usd(m.overall.decision_regret_mean_usd)} / {usd(m.overall.decision_regret_max_usd)}
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {byState.length > 0 && (
+        <div className="mt-5 overflow-x-auto">
+          <div className="mb-1 text-xs text-slate-400">
+            By fault state at the decision point (fixed spread). A latent fault is scheduled but has not started, so no
+            telemetry can reveal it; active faults are the fair test of the estimator.
+          </div>
+          <table className="w-full min-w-[760px] text-left">
+            <thead>
+              <tr>
+                <Th>Fault state</Th>
+                <Th right>Decision points</Th>
+                <Th right>Brier</Th>
+                <Th right>Predicted safe → fails</Th>
+                <Th right>Peak-T 10–90 % coverage</Th>
+                <Th right>Best action matched</Th>
+                <Th right>Mean regret</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {byState.map(([state, v]) => (
+                <tr key={state}>
+                  <Td strong={state === "active"}>{FAULT_STATE_LABEL[state] ?? state}</Td>
+                  <Td right>{v.decisions}</Td>
+                  <Td right>{num(v.brier, 3)}</Td>
+                  <Td right>
+                    {v.false_safe_branches}/{v.predicted_safe_branches}
+                  </Td>
+                  <Td right>{num((v.peak_temperature_p10_p90_coverage ?? 0) * 100, 0)}%</Td>
+                  <Td right>
+                    {v.decision_matches_reference_best}/{v.decisions}
+                  </Td>
+                  <Td right>{usd(v.decision_regret_mean_usd ?? 0)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
+        Actions: {cf.actions.join(", ")}. Reference: {cf.reference} &ldquo;Predicted safe → fails&rdquo; counts branches
+        where the estimated ensemble shows no failure but the true process sometimes fails; peak-temperature coverage is
+        nominally 80 %. Both sides use the same twin equations, so this measures state-estimation error, not model-form
+        error.
+      </p>
+    </Card>
   );
 }
 

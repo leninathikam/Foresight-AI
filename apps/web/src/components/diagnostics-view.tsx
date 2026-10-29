@@ -84,7 +84,7 @@ export function DiagnosticsView() {
             <Card
               key={p.name}
               title={p.label}
-              subtitle={p.default ? "Default provider · Responses API" : "Responses API"}
+              subtitle={p.default ? "Default provider Â· Responses API" : "Responses API"}
               actions={
                 <Button
                   onClick={() =>
@@ -103,10 +103,10 @@ export function DiagnosticsView() {
                 <Row k="API key configured" v={<Badge tone={p.configured ? "emerald" : "amber"}>{p.configured ? "yes" : "no"}</Badge>} />
                 <Row k="Base URL" v={p.base_url} />
                 <Row k="Model" v={p.model} />
-                <Row k="Reasoning efforts" v={p.efforts.join(" · ")} />
+                <Row k="Reasoning efforts" v={p.efforts.join(" Â· ")} />
                 <Row
                   k="Price per 1M tokens"
-                  v={`$${p.price_per_m.input} in${p.price_per_m.cached_input != null ? ` · $${p.price_per_m.cached_input} cached` : ""} · $${p.price_per_m.output} out`}
+                  v={`$${p.price_per_m.input} in${p.price_per_m.cached_input != null ? ` Â· $${p.price_per_m.cached_input} cached` : ""} Â· $${p.price_per_m.output} out`}
                 />
               </KeyValueList>
               {!p.configured && (
@@ -128,7 +128,7 @@ export function DiagnosticsView() {
         <Card title="Predictive models" subtitle={diag?.model_path}>
           <KeyValueList>
             {["version", "trained_at", "train_rows", "validation_rows", "train_episodes", "validation_episodes", "xgboost_version", "sklearn_version", "iforest_threshold"].map((k) => (
-              <Row key={k} k={k.replaceAll("_", " ")} v={meta[k] === undefined ? "—" : String(meta[k])} />
+              <Row key={k} k={k.replaceAll("_", " ")} v={meta[k] === undefined ? "â€”" : String(meta[k])} />
             ))}
           </KeyValueList>
           {meta.cusum_calibration ? (

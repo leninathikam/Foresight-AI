@@ -261,7 +261,7 @@ def _redteam_summary(path) -> dict | None:
 @app.get("/api/redteam")
 async def redteam():
     """Latest verifier red-team report plus earlier verifier versions if present."""
-    names = ["redteam_v1", "redteam_v2", "redteam_v3", "redteam"]
+    names = ["redteam_v1", "redteam_v2", "redteam_v3", "redteam_v4", "redteam"]
     reports = [r for n in names if (r := _redteam_summary(REPORTS_DIR / f"{n}.json"))]
     if not reports:
         raise HTTPException(

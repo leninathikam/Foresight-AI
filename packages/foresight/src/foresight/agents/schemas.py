@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from foresight.branching import BranchOutcome
 from foresight.prediction.schemas import EvidenceItem
-from foresight.verification import VerificationResult
+from foresight.verification import InformationAssessment, VerificationResult
 
 
 class AgentStage(StrEnum):
@@ -92,7 +92,9 @@ class RejectedProposal(BaseModel):
 
 
 class AgentRecommendation(BaseModel):
-    status: Literal["awaiting_approval", "no_action_needed", "no_safe_action_found"]
+    status: Literal[
+        "awaiting_approval", "gather_information", "no_action_needed", "no_safe_action_found"
+    ]
     action: dict | None
     action_label: str
     claimed_failure_mode: str
@@ -104,6 +106,9 @@ class AgentRecommendation(BaseModel):
     baseline: BranchOutcome | None = None
     comparison_id: str | None = None
     selected_by: Literal["agent", "optimizer_fallback", "deterministic_planner"]
+    # Present when the information gate ran; with status gather_information, ``action`` is the
+    # verified action held back while more telemetry is gathered.
+    information: InformationAssessment | None = None
 
 
 class AgentUsage(BaseModel):

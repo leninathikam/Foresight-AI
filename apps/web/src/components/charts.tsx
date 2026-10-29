@@ -65,7 +65,7 @@ export interface TelemetryChartProps {
 }
 
 const METRIC = {
-  T: { name: "Winding temperature (°C)", color: PALETTE.thermal, limits: [130, 155] },
+  T: { name: "Winding temperature (Â°C)", color: PALETTE.thermal, limits: [130, 155] },
   vib: { name: "Vibration RMS (mm/s)", color: PALETTE.accent, limits: [4.5, 7.1] },
   load: { name: "Load (% rated)", color: "#b3b3ae", limits: [100] },
   I: { name: "Current (A)", color: PALETTE.steel, limits: [] as number[] },
@@ -203,8 +203,8 @@ export function BranchBandChart({
           <XAxis dataKey="t" type="number" domain={[0, "dataMax"]} tickFormatter={(v) => `+${Math.round(v)}m`} {...AXIS} />
           <YAxis domain={["auto", "auto"]} {...AXIS} width={44} />
           <Tooltip {...TOOLTIP} labelFormatter={(v) => `+${Number(v).toFixed(0)} min`} formatter={(v, n) => {
-            const label = n === "band" ? "p10–p90 (selected)" : branches.find((b) => b.branch_id === n)?.label ?? String(n);
-            const text = Array.isArray(v) ? `${Number(v[0]).toFixed(1)} – ${Number(v[1]).toFixed(1)}` : Number(v).toFixed(1);
+            const label = n === "band" ? "p10â€“p90 (selected)" : branches.find((b) => b.branch_id === n)?.label ?? String(n);
+            const text = Array.isArray(v) ? `${Number(v[0]).toFixed(1)} â€“ ${Number(v[1]).toFixed(1)}` : Number(v).toFixed(1);
             return [text, label];
           }} />
           {limits.map((l, i) => (

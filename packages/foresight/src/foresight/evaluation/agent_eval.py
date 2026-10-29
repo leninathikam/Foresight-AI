@@ -107,6 +107,9 @@ def summarise_runs(runs: list[dict]) -> dict:
         "no_safe_action_rate": round(
             sum(r["recommendation"] == "no_safe_action_found" for r in runs) / n, 4
         ),
+        "gather_information_rate": round(
+            sum(r["recommendation"] == "gather_information" for r in runs) / n, 4
+        ),
         "tool_calls": tool_calls,
         "tool_success_rate": round(1 - tool_errors / tool_calls, 4) if tool_calls else None,
         "invalid_actions": sum(r["invalid_actions"] for r in runs),
@@ -157,6 +160,20 @@ def deterministic_agent_metrics(intervention_eval: dict) -> dict:
         "source": "agent runs triggered inside the closed-loop intervention evaluation",
         **summarise_runs(runs),
     }
+
+
+def carry_over_live_blocks(agent: dict, previous: dict) -> dict:
+    """Keep earlier live model results that this run did not repeat.
+
+    Live runs cost money and an offline evaluation never repeats them, so without this a full
+    re-run would silently drop them from the report."""
+    merged = dict(agent)
+    for key, block in (previous.get("agent") or {}).items():
+        if key == "deterministic" or not isinstance(block, dict) or block.get("status") != "run":
+            continue
+        if merged.get(key, {}).get("status") != "run":
+            merged[key] = block
+    return merged
 
 
 def _audit_regret(snap: AgentSnapshot, agent_action: dict | None, planner_action: dict | None):
@@ -256,6 +273,7 @@ async def _one_run(
         "rejected": [r.action_label for r in trace.rejected],
         "recommendation": rec.status if rec else None,
         "action": rec.action_label if rec else None,
+        "information": rec.information.decision if rec and rec.information else None,
         "selected_by": rec.selected_by if rec else None,
         "llm_calls": trace.usage.llm_calls,
         "input_tokens": trace.usage.input_tokens,

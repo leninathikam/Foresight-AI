@@ -164,6 +164,17 @@ Training / validation / test use disjoint seed ranges. See `artifacts/reports/ev
 
 From a frozen estimated (or oracle) state, clone N members × K interventions, simulate a shared horizon with common random numbers, score an explicit economic objective, and rank branches. Estimates are **not** claimed causal effects.
 
+The state estimator fits the cooling, bearing and load trends from the telemetry window and also reports each fit's standard error (OLS; batch means for the autocorrelated load signal). `compare_futures(trend_uncertainty="standard_error")` widens each member's trend jitter to at least one standard error instead of the fixed ±25 %. The planner default stays `"fixed"`, so earlier numbers reproduce. `foresight.evaluation.counterfactual` checks both modes against the hidden true process (see section 6 of `evaluation.md`).
+
+### 4b. Information gate (`foresight.verification.information`)
+
+Runs after the verifier accepts a consequential action, and only in the active policy (`AgentSnapshot.information_gathering`). It holds the action back for 15 minutes of more telemetry only when both conditions hold:
+
+1. **The risk depends on weak evidence.** Some trend that drives the forecast has a fit with t < 2, and with those trends removed the no-action future shows no failure, no alarm and no limit breach.
+2. **Waiting is safe.** With standard errors propagated (on fresh seeds), the earliest simulated failure comes after the deferral plus a 15-minute margin, and the p90 temperature and vibration stay within limits.
+
+Otherwise the verified action goes ahead. A held action is still shown with "override and apply now"; the apply endpoint re-verifies server-side. The gate targets one measured failure mode: right after an inspection or restart, a few minutes of noisy data can fit a spurious trend, and the planner's jitter turns that into a false inspection.
+
 ### 5. Verification (`foresight.verification`)
 
 Deterministic, LLM-independent policy checks on typed proposals + branch outcomes. Can reject unsafe or incomplete recommendations. Consequential actions always require human approval in the live UI.
@@ -181,13 +192,13 @@ Operator commands sent without a comparison bypass the verifier and are logged a
 | v3 | vibration p90 limit 1 mm/s below the trip (6.1 mm/s); a tie with doing nothing is not a benefit; an inspection must start inside the simulated horizon (`strict_improvement`) | an untested load cut with p90 vibration just under the trip failed 1/48 in the audit; inspections scheduled after the horizon tied the no-action objective |
 | v4 | inspection lead time measured from the baseline's *earliest* simulated failure, not the median (`inspection_before_earliest_failure`) | late bearing inspections (40–45 min) let early-failing members fail first (1–2/48 in the audit) |
 
-v4 is the default in code. It has a regression test but has **not** been red-teamed or re-evaluated yet, so all reported numbers come from v1–v3.
+v4 is the default in code. Its red-team (`redteam_v4.md`, 366 attempts) had no late-inspection escapes. It found one distinct new hard escape, submitted 3 times: a 35 % load cut on a bearing case that fails in 1 of 48 audit members (95 % CI 0.4–10.9 %), while the verifier's 16-member confirmation saw none. That is tail risk below the ensemble's resolution. Closing it needs a larger confirmation ensemble or a stricter vibration margin for derating on bearing faults, and it is not fixed yet.
 
 **Red-team** (`foresight.evaluation.redteam`, `scripts/run_red_team.py`): an attacker model (Muse Spark Open on Fireworks, or Muse Spark 1.3 on Meta) sees the safety policy, the check list and the real evidence ids. It proposes interventions it expects to pass while being unsafe, wasteful or backed by fabricated evidence, and adapts over three rounds using the verifier's feedback. Proposals go through the agent's own tool path. Every accepted proposal is audited with a 48-member ensemble on fresh seeds. A seeded random fuzzer with the same budget is the control. Escapes are judged against the same twin (a larger ensemble with fresh seeds), not against ground truth.
 
 ### 6. Agent (`foresight.agents`)
 
-Bounded state machine: OBSERVE → ANALYZE → HYPOTHESIZE → INVESTIGATE → SIMULATE → VERIFY → RECOMMEND.
+Bounded state machine: OBSERVE → ANALYZE → HYPOTHESIZE → INVESTIGATE → SIMULATE → VERIFY → (information gate) → RECOMMEND. A run ends `verified`, `gather_information` (verified but held back), `rejected` or `no_action`. Live re-check on v4 (`evaluation.md` §7, 28 runs): 0 unsafe picks, 0 healthy false alarms; the gate held 0/28 of those snapshots because the trends were supported.
 
 - Live path: Responses API with function tools + structured output, from either provider through one `ModelClient`. The options are Meta Model API (`muse-spark-1.3`) and Fireworks AI (`muse-spark-open`). Provider and reasoning effort are chosen per run and recorded in the trace, and cost uses each provider's prices, including Fireworks cached-input pricing.
 - Fallback: deterministic planner (clearly labelled in traces)

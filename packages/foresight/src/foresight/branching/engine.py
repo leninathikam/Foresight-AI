@@ -38,6 +38,7 @@ from foresight.simulation import (
 )
 
 StateSource = Literal["estimated", "oracle"]
+TrendUncertainty = Literal["fixed", "standard_error"]
 ACTION_ADAPTER: TypeAdapter[Action] = TypeAdapter(Action)
 TRAJECTORY_EVERY_S = 60.0
 DETECTABLE_DAMAGE = 0.15  # below this, vibration-inferred damage is within sensor-noise bias
@@ -118,6 +119,7 @@ class FutureComparison(BaseModel):
     n_members: int
     state_source: StateSource
     estimate: StateEstimate | None
+    trend_uncertainty: TrendUncertainty = "fixed"
     baseline_branch_id: str
     branches: list[BranchOutcome]
     ranking: list[str] = Field(description="Branch ids sorted by objective (lower is better)")
@@ -185,21 +187,46 @@ def wilson_interval(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
 
 
 def planning_twin_from_estimate(
-    est: StateEstimate, horizon_s: float, seed: int, perturb: np.random.Generator | None
+    est: StateEstimate,
+    horizon_s: float,
+    seed: int,
+    perturb: np.random.Generator | None,
+    trend_uncertainty: TrendUncertainty = "fixed",
 ) -> MotorTwin:
-    """Build a planning twin from estimated state. ``perturb`` samples parameter uncertainty."""
+    """Build a planning twin from estimated state. ``perturb`` samples parameter uncertainty.
+
+    ``trend_uncertainty="standard_error"`` widens each trend's spread to at least the standard
+    error of its fit, so a trend fitted on little data is sampled as the uncertain quantity it is.
+    """
 
     def jitter(value: float, std: float, lo: float, hi: float) -> float:
         if perturb is None:
             return value
         return float(np.clip(value + std * perturb.standard_normal(), lo, hi))
 
+    def spread(fixed: float, se: float | None) -> float:
+        if trend_uncertainty == "standard_error" and se is not None:
+            return max(fixed, se)
+        return fixed
+
     eta = jitter(est.cooling_efficiency, est.cooling_efficiency_std, 0.05, 1.0)
     fouling_rate = max(0.0, -est.cooling_trend_per_h)
-    fouling_rate = jitter(fouling_rate, 0.25 * fouling_rate + 0.01, 0.0, 2.0)
+    fouling_rate = jitter(
+        fouling_rate, spread(0.25 * fouling_rate + 0.01, est.cooling_trend_se_per_h), 0.0, 2.0
+    )
     damage = jitter(est.bearing_damage, est.bearing_damage_std, 0.0, 0.95)
-    growth = jitter(est.bearing_growth_per_h, 0.25 * est.bearing_growth_per_h, 0.0, 5.0)
-    load_trend = jitter(est.load_trend_per_h, 0.2 * abs(est.load_trend_per_h) + 0.005, -1.0, 2.0)
+    growth = jitter(
+        est.bearing_growth_per_h,
+        spread(0.25 * est.bearing_growth_per_h, est.bearing_growth_se_per_h),
+        0.0,
+        5.0,
+    )
+    load_trend = jitter(
+        est.load_trend_per_h,
+        spread(0.2 * abs(est.load_trend_per_h) + 0.005, est.load_trend_se_per_h),
+        -1.0,
+        2.0,
+    )
 
     t0 = est.t_s
     fault = FaultConfig(
@@ -431,6 +458,7 @@ def compare_futures(
     estimate: StateEstimate | None = None,
     oracle_twin: MotorTwin | None = None,
     economics: EconomicParameters = DEFAULT_ECONOMICS,
+    trend_uncertainty: TrendUncertainty = "fixed",
 ) -> FutureComparison:
     """Simulate each action (plus a no-action baseline) from the same initial state."""
     start = time.perf_counter()
@@ -460,7 +488,15 @@ def compare_futures(
             initial.append(oracle_twin.clone(reseed=seed))  # type: ignore[union-attr]
         else:
             perturb = np.random.default_rng(seed)
-            initial.append(planning_twin_from_estimate(estimate, horizon_s, seed, perturb))  # type: ignore[arg-type]
+            initial.append(
+                planning_twin_from_estimate(
+                    estimate,  # type: ignore[arg-type]
+                    horizon_s,
+                    seed,
+                    perturb,
+                    trend_uncertainty,
+                )
+            )
     t0 = initial[0].state.t_s
 
     outcomes: list[BranchOutcome] = []
@@ -493,6 +529,7 @@ def compare_futures(
         n_members=n_members,
         state_source=state_source,
         estimate=estimate if state_source == "estimated" else None,
+        trend_uncertainty=trend_uncertainty,
         baseline_branch_id="baseline",
         branches=outcomes,
         ranking=ranking,

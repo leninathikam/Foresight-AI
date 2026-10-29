@@ -5,9 +5,71 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { num, pct, simClock, usd } from "@/lib/format";
 import { useSession } from "@/lib/session-context";
-import type { AgentStage, AgentTrace, EvidenceItem, ProviderInfo, ProviderName, TraceStep } from "@/lib/types";
+import type {
+  AgentStage,
+  AgentTrace,
+  EvidenceItem,
+  InformationAssessment,
+  ProviderInfo,
+  ProviderName,
+  TraceStep,
+  TrendEvidence,
+} from "@/lib/types";
 import { Badge, Button, Card, EmptyState, Eyebrow, Notice, PageHeader, ProvenanceTag, Segmented, Spinner, cx, inputClass } from "./ui";
 import { VerificationView } from "./verification-view";
+
+const TREND_LABEL: Record<TrendEvidence["name"], string> = {
+  cooling_fouling: "Cooling fouling",
+  bearing_growth: "Bearing damage growth",
+  load_ramp: "Load ramp",
+};
+
+function InformationGate({ info }: { info: InformationAssessment }) {
+  const gather = info.decision === "gather_information";
+  return (
+    <div>
+      <Eyebrow className="mb-2">Information gate</Eyebrow>
+      <Notice tone={gather ? "amber" : "slate"}>
+        <span className="font-medium text-slate-100">{gather ? `Gather ${num(info.defer_minutes, 0)} more minutes of data` : "Act now"}</span>
+        {" · "}
+        {info.reasons[0]}
+      </Notice>
+      <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-x-5 border-y border-slate-800 py-2 font-mono text-[10.5px] uppercase tracking-[0.08em] text-slate-500">
+        <span>Fitted trend</span>
+        <span className="text-right">per hour</span>
+        <span className="text-right">t-stat</span>
+        <span className="text-right">status</span>
+      </div>
+      {info.trends.map((t) => (
+        <div key={t.name} className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-x-5 border-b border-slate-800 py-2 text-[12px]">
+          <span className={t.drives_forecast ? "text-slate-200" : "text-slate-500"}>{TREND_LABEL[t.name]}</span>
+          <span className="text-right font-mono tabular-nums text-slate-300">
+            {num(t.value_per_h, 3)}
+            {t.se_per_h !== null ? ` ± ${num(t.se_per_h, 3)}` : ""}
+          </span>
+          <span className="text-right font-mono tabular-nums text-slate-300">{t.t_stat === null ? "n/a" : num(t.t_stat, 1)}</span>
+          <span className="text-right">
+            {!t.drives_forecast ? (
+              <Badge tone="slate">inactive</Badge>
+            ) : t.supported ? (
+              <Badge tone="emerald">supported</Badge>
+            ) : (
+              <Badge tone="amber">weak</Badge>
+            )}
+          </span>
+        </div>
+      ))}
+      {info.reasons.length > 1 && (
+        <ul className="mt-2 space-y-1 text-[12px] leading-relaxed text-slate-400">
+          {info.reasons.slice(1).map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-2"><ProvenanceTag kind="simulation_estimate" /></div>
+    </div>
+  );
+}
 
 const STAGES: AgentStage[] = ["OBSERVE", "ANALYZE", "HYPOTHESIZE", "INVESTIGATE", "SIMULATE", "VERIFY", "RECOMMEND", "DONE"];
 
@@ -388,12 +450,23 @@ export function AgentView() {
                 >
                   <div className="space-y-5">
                     <div>
-                      <Badge tone={rec.status === "awaiting_approval" ? "cyan" : rec.status === "no_action_needed" ? "emerald" : "rose"}>
-                        {rec.status.replaceAll("_", " ")}
+                      <Badge
+                        tone={
+                          rec.status === "awaiting_approval"
+                            ? "cyan"
+                            : rec.status === "gather_information"
+                              ? "amber"
+                              : rec.status === "no_action_needed"
+                                ? "emerald"
+                                : "rose"
+                        }
+                      >
+                        {rec.status === "gather_information" ? "gathering data · action held back" : rec.status.replaceAll("_", " ")}
                       </Badge>
                       <div className="mt-2.5 text-[22px] font-medium leading-tight tracking-[-0.015em] text-slate-50">{rec.action_label}</div>
                       <p className="mt-2 text-[13px] leading-relaxed text-slate-400">{rec.rationale}</p>
                     </div>
+                    {rec.information && <InformationGate info={rec.information} />}
                     {rec.branch && rec.baseline && (
                       <div>
                         <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-6 border-y border-slate-800 py-2 font-mono text-[10.5px] uppercase tracking-[0.08em] text-slate-500">
@@ -426,15 +499,17 @@ export function AgentView() {
                         <VerificationView v={rec.verification} />
                       </div>
                     )}
-                    {rec.status === "awaiting_approval" && rec.action && !applied && (
+                    {(rec.status === "awaiting_approval" || rec.status === "gather_information") && rec.action && !applied && (
                       <div className="space-y-3 rounded-[5px] border border-slate-700 bg-slate-950 p-4">
                         <label className="flex items-start gap-2.5 text-[12px] leading-relaxed text-slate-300">
                           <input type="checkbox" checked={approve} onChange={(e) => setApprove(e.target.checked)} className="mt-0.5 accent-slate-100" />
-                          I have reviewed the evidence and approve &ldquo;{rec.action_label}&rdquo;. It will be
-                          re-verified against the current state before execution.
+                          {rec.status === "gather_information"
+                            ? "The system recommends waiting for more telemetry. I want to apply the held-back action now anyway. "
+                            : "I have reviewed the evidence and approve "}
+                          &ldquo;{rec.action_label}&rdquo;. It will be re-verified against the current state before execution.
                         </label>
-                        <Button variant="primary" className="w-full" onClick={applyRecommendation} disabled={!approve || applying}>
-                          {applying && <Spinner />} Approve and apply
+                        <Button variant={rec.status === "gather_information" ? "secondary" : "primary"} className="w-full" onClick={applyRecommendation} disabled={!approve || applying}>
+                          {applying && <Spinner />} {rec.status === "gather_information" ? "Override and apply now" : "Approve and apply"}
                         </Button>
                       </div>
                     )}

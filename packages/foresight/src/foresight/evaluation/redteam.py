@@ -40,6 +40,8 @@ from foresight.verification import DEFAULT_POLICY, Proposal
 AUDIT_SEED = 4242
 AUDIT_MEMBERS = 48
 FUZZ_SEED = 1234
+# A failed attacker round is retried so a network outage cannot silently shrink the budget.
+ROUND_RETRY_WAITS_S = (30.0, 90.0, 240.0)
 
 TRUE_MODE = {
     ScenarioId.HEALTHY: "none",
@@ -404,14 +406,26 @@ async def _attack_case(
 ) -> list[dict]:
     st = _CaseState(case, ToolExecutor(case.snapshot(f"redteam-{key}")))
     for rnd in range(1, rounds + 1):
-        async with sem:
-            try:
-                props = await _attacker_round(client, st, per_round, rnd, usage, max_output_tokens)
-            except LLMError as exc:
-                usage["errors"] += 1
-                if on_progress:
-                    on_progress(f"{key} {case.label} round {rnd}: attacker error {exc}")
-                continue
+        props = None
+        for attempt, wait_s in enumerate((*ROUND_RETRY_WAITS_S, None), start=1):
+            async with sem:
+                try:
+                    props = await _attacker_round(
+                        client, st, per_round, rnd, usage, max_output_tokens
+                    )
+                    break
+                except LLMError as exc:
+                    usage["errors"] += 1
+                    if on_progress:
+                        on_progress(
+                            f"{key} {case.label} round {rnd}: attacker error {exc} "
+                            f"(attempt {attempt})"
+                        )
+            if wait_s is not None:
+                await asyncio.sleep(wait_s)
+        if props is None:
+            usage["rounds_lost"] = usage.get("rounds_lost", 0) + 1
+            continue
         for p in props:
             st.history.append(await _evaluate(st, p, key, rnd))
         if on_progress:

@@ -2,7 +2,7 @@
 
 **Goal:** Show a working Observe → Predict → Diagnose → Simulate → Verify → Recommend loop on a live digital twin. All UI actions must succeed live.
 
-**Prep:** API on `:8000`, web on `:3000`. Prefer a live `MODEL_API_KEY` so the Agent page uses Muse Spark; if unset, say clearly that the deterministic planner is running and show Diagnostics.
+**Prep:** API on `:8000`, web on `:3000` (if `:8000` is taken, start the API with `--port 8001` and run the web app with `NEXT_PUBLIC_API_BASE_URL=http://localhost:8001`). Prefer a live `MODEL_API_KEY` so the Agent page uses Muse Spark; if unset, say clearly that the deterministic planner is running and show Diagnostics.
 
 ---
 
@@ -39,6 +39,10 @@ Open **Futures Lab**. Compare Continue / Reduce load / Increase cooling / Inspec
 Show verifier accepting inspection (or rejecting a delayed inspection on overload — seed from smoke: overload @ 60 min rejects “Inspection in 10 min”).
 
 > “An independent policy engine can reject the agent. Unsafe or incomplete proposals never auto-apply.”
+
+Scroll to **Information gate** under the recommendation. On seed 7 it reads *Act now*: the cooling-fouling trend has t ≈ 21, so more data would not change the decision.
+
+> “Before acting, Foresight checks whether the risk rests on trends it has actually measured. If a trend fit is weak (t < 2) and waiting 15 minutes is safe under the fit's own standard error, it holds the action and gathers data instead. On our test seeds that removed false inspections after restarts without adding a single failure.”
 
 ### 2:30–3:00 — Outcome
 

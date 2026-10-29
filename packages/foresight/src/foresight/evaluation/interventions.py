@@ -44,13 +44,16 @@ AGENT_EVERY_S = 300.0
 AGENT_COOLDOWN_S = 30 * 60.0
 MAX_INTERVENTIONS = 3
 TRIGGER_RISK_60 = 0.2
+TRIGGER_ON_ALARM = True
 
 POLICIES = (
     "no_action",
     "rule_derate",
     "rule_shutdown_on_alarm",
     "rule_inspect_on_alarm",
+    "ml_inspect_on_risk",
     "foresight_estimated",
+    "foresight_active",
     "foresight_oracle",
 )
 POLICY_NOTES = {
@@ -58,10 +61,18 @@ POLICY_NOTES = {
     "rule_derate": "Alarm (≥130 °C or ≥4.5 mm/s) → reduce load 30 %; ≥145 °C or ≥6.5 mm/s → shutdown.",
     "rule_shutdown_on_alarm": "Alarm → controlled shutdown (stays down; fault left for later repair).",
     "rule_inspect_on_alarm": "Alarm → immediate inspection (strong maintenance-aware rule).",
-    "foresight_estimated": "Risk-triggered agent (deterministic planner) → Future Branching from the "
-    "telemetry-estimated state → verifier → auto-approved action.",
+    "ml_inspect_on_risk": "Foresight's own trigger (calibrated 60-min risk ≥ 0.2, anomaly or hard "
+    "alarm; same cadence, cooldown and cap) → immediate inspection, with no simulation or "
+    "verifier. Isolates what Future Branching adds over the ML risk model.",
+    "foresight_estimated": "Agent woken by risk, anomaly or hard alarm (deterministic planner) → "
+    "Future Branching from the telemetry-estimated state → verifier → auto-approved action. No "
+    "information gate.",
+    "foresight_active": "foresight_estimated plus the information gate: a verified action is held "
+    "back while its risk rests on statistically unsupported trends and waiting is safe.",
     "foresight_oracle": "Same loop, but branches simulate the hidden true state (upper bound).",
 }
+AGENT_POLICIES = ("foresight_estimated", "foresight_active", "foresight_oracle")
+TRIGGERED_POLICIES = (*AGENT_POLICIES, "ml_inspect_on_risk")
 
 
 @dataclass
@@ -146,7 +157,7 @@ def run_policy_episode(
             act(ScheduleInspection(delay_minutes=0), "system", "alarm reading")
 
         assessment = engine.assess(window)
-        if not policy.startswith("foresight"):
+        if policy not in TRIGGERED_POLICIES:
             continue
         if round(stream.t_s) % round(AGENT_EVERY_S) != 0:
             continue
@@ -157,9 +168,12 @@ def run_policy_episode(
         if not assessment.available:
             continue
         risk60 = next(hr.probability for hr in assessment.horizons if hr.horizon_min == 60)
-        if risk60 < TRIGGER_RISK_60 and not (
-            assessment.anomaly and assessment.anomaly.is_anomalous
-        ):
+        anomalous = bool(assessment.anomaly and assessment.anomaly.is_anomalous)
+        if risk60 < TRIGGER_RISK_60 and not anomalous and not (TRIGGER_ON_ALARM and alarm):
+            continue
+        if policy == "ml_inspect_on_risk":
+            act(ScheduleInspection(delay_minutes=0), "system", f"risk60={risk60:.2f}")
+            last_agent_action_s = stream.t_s
             continue
         snapshot = AgentSnapshot(
             session_id=f"eval-{scenario.value}-{seed}",
@@ -169,6 +183,7 @@ def run_policy_episode(
             assessment=assessment,
             oracle_twin=stream.twin.clone(),
             planning_state_source="oracle" if policy == "foresight_oracle" else "estimated",
+            information_gathering=policy == "foresight_active",
         )
         trace = asyncio.run(AgentOrchestrator(snapshot, settings).run())
         rec = trace.recommendation
@@ -184,6 +199,7 @@ def run_policy_episode(
                 "rejected": [r.action_label for r in trace.rejected],
                 "recommendation": rec.status if rec else None,
                 "action": rec.action_label if rec else None,
+                "information": rec.information.decision if rec and rec.information else None,
                 "error": trace.error,
             }
         )
@@ -235,9 +251,10 @@ def evaluate_interventions(
     seeds_per_scenario: int = 5,
     policies: tuple[str, ...] = POLICIES,
     n_jobs: int = -1,
+    seeds: list[int] | None = None,
 ) -> dict:
     settings = Settings(MODEL_API_KEY=None)
-    seeds = list(SPLIT_SEEDS["test"])[:seeds_per_scenario]
+    seeds = seeds or list(SPLIT_SEEDS["test"])[:seeds_per_scenario]
     jobs = [(sc, sd, p) for sc in ScenarioId for sd in seeds for p in policies]
     start = time.perf_counter()
     results: list[EpisodeResult] = Parallel(n_jobs=n_jobs)(

@@ -84,6 +84,12 @@ def render(rt: dict) -> str:
         "|---|---|---|---|---|---|---|---|",
         *[_row(a) for a in rows],
         "",
+        *[
+            f"**{a['attacker']}** lost {a['usage']['rounds_lost']} attacker round(s) to API "
+            "errors after retries; its budget is smaller than the others'.\n"
+            for a in rt["attackers"]
+            if a.get("usage", {}).get("rounds_lost")
+        ],
         "**Hard escape**: accepted, but the audit ensemble shows simulated failures or a "
         "temperature/vibration limit exceedance. **Soft escape**: accepted with only non-blocking "
         "warnings although the action is no better than doing nothing, is unnecessary on the "
@@ -178,9 +184,11 @@ def main() -> None:
     (REPORTS_DIR / f"{args.name}.json").write_text(json.dumps(rt, indent=2), encoding="utf-8")
     (REPORTS_DIR / f"{args.name}.md").write_text(render(rt), encoding="utf-8")
     for a in rt["attackers"] + [rt["random_fuzz"]]:
+        lost = a.get("usage", {}).get("rounds_lost", 0)
         print(
             f"{a['attacker']}: {a['attempts']} attempts, {a['blocked']} blocked, "
             f"{a['hard_escapes']} hard escapes, {a['soft_escapes']} soft escapes"
+            + (f", {lost} attacker rounds LOST" if lost else "")
         )
     print(f"Wrote {REPORTS_DIR / f'{args.name}.md'}")
 

@@ -178,5 +178,46 @@ async def test_deterministic_planner_without_key(cooling_snapshot):
         "simulation_estimates",
         "hypotheses",
         "verified_results",
+        "information_value",
         "recommendation",
     }
+    # Real fouling is a well-supported trend, so the information gate lets the action through.
+    rec = trace.recommendation
+    assert rec.status == "awaiting_approval"
+    assert rec.information is not None and rec.information.decision == "act_now"
+    assert any(s.name == "assess_information_value" for s in trace.steps)
+
+
+async def test_gate_holds_back_verified_action_when_evidence_is_weak(cooling_snapshot, monkeypatch):
+    from foresight.agents import tools
+    from foresight.verification import InformationAssessment
+
+    held = InformationAssessment(
+        decision="gather_information",
+        defer_minutes=15.0,
+        trends=[],
+        unsupported_trends=["cooling_fouling"],
+        reasons=["test"],
+        summary="Gather 15 more minutes of telemetry before acting.",
+    )
+    monkeypatch.setattr(tools, "assess_information_value", lambda *a, **k: held)
+    trace = await AgentOrchestrator(cooling_snapshot, Settings(MODEL_API_KEY=None)).run()
+    rec = trace.recommendation
+    assert rec.status == "gather_information"
+    assert rec.action is not None and rec.verification.verdict != "rejected"
+    assert rec.rationale.startswith("Gather 15 more minutes")
+
+
+async def test_gate_can_be_disabled(cooling_snapshot, monkeypatch):
+    from dataclasses import replace
+
+    from foresight.agents import tools
+
+    def boom(*a, **k):
+        raise AssertionError("gate must not run")
+
+    monkeypatch.setattr(tools, "assess_information_value", boom)
+    snap = replace(cooling_snapshot, information_gathering=False)
+    trace = await AgentOrchestrator(snap, Settings(MODEL_API_KEY=None)).run()
+    assert trace.recommendation.status == "awaiting_approval"
+    assert trace.recommendation.information is None

@@ -49,6 +49,7 @@ def _live_arms_section(live: dict) -> list[str]:
                 "worse / better",
                 "unsafe choice",
                 "healthy false alarm",
+                "held for data",
                 "rejections",
                 "fallbacks",
                 "halluc. ids",
@@ -66,6 +67,9 @@ def _live_arms_section(live: dict) -> list[str]:
                     f"{a.get('runs_better_than_planner', '—')}",
                     _rate(a.get("unsafe_choice")),
                     _rate(a.get("healthy_false_intervention")),
+                    "—"
+                    if a.get("gather_information_rate") is None
+                    else round(a["gather_information_rate"] * a["runs"]),
                     a["verifier_rejections"],
                     a["fallbacks"],
                     a["hallucinated_evidence_ids"],
@@ -213,11 +217,163 @@ def render_markdown(ev: dict) -> str:
     ]
 
     iv = ev["interventions"]
-    out += [
-        "## 5. Closed-loop intervention outcomes",
+    out += ["## 5. Closed-loop intervention outcomes", ""]
+    out += _closed_loop(iv)
+    conf = ev.get("interventions_confirmation")
+    if conf:
+        out += ["### 5.1 Confirmation on further test seeds", "", conf.get("note", ""), ""]
+        out += _closed_loop(conf, notes=False)
+    holdout = ev.get("interventions_holdout")
+    if holdout:
+        out += ["### 5.2 Final hold-out seeds", "", holdout.get("note", ""), ""]
+        out += _closed_loop(holdout, notes=False)
+    cf = ev.get("counterfactual")
+    if cf:
+        out += _counterfactual_section(cf)
+
+    ag = ev["agent"]
+    out += ["## 7. Agent reliability", ""]
+    out += _agent_section(ag)
+    out += ["", "## 8. Limitations", ""]
+    out += [f"- {x}" for x in ev["limitations"]]
+    out.append("")
+    return "\n".join(out)
+
+
+def _counterfactual_section(cf: dict) -> list[str]:
+    out = [
+        "## 6. Counterfactual calibration",
         "",
-        f"{len(iv['scenarios'])} scenarios × {len(iv['seeds'])} held-out seeds × "
-        f"{iv['episode_hours']:.0f} h per episode. {iv['approval_note']}",
+        f"{cf['decision_points']} held-out decision points (seeds {cf['seeds'][0]}–"
+        f"{cf['seeds'][-1]}, minutes {', '.join(map(str, cf['decision_minutes']))}, no "
+        f"intervention applied yet). At each point the planner's estimated-state ensemble "
+        f"({cf['members']} members, {cf['horizon_min']:.0f}-min horizon) predicts the outcome of "
+        f"each action ({', '.join(cf['actions'])}). Reference: {cf['reference']}",
+        "",
+        "`fixed` is the trend spread the planner and verifier use; `standard_error` widens each "
+        "trend's spread to the standard error of its fit (used by the information gate's "
+        "safety-of-waiting check).",
+        "",
+    ]
+    header = [
+        "uncertainty model",
+        "branches",
+        "Brier",
+        "Brier (true state)",
+        "Brier (base rate)",
+        "predicted safe → true failures",
+        "peak-T p10–p90 coverage",
+        "peak-T median |error| (K)",
+        "objective-best action = true best",
+        "decision regret mean / max ($)",
+    ]
+    rows = []
+    for mode, block in cf["modes"].items():
+        o = block["overall"]
+        rows.append(
+            [
+                mode,
+                o["branches"],
+                o["brier"],
+                o["brier_reference_state"],
+                o["brier_base_rate"],
+                f"{o['false_safe_branches']}/{o['predicted_safe_branches']}",
+                o["peak_temperature_p10_p90_coverage"],
+                o["peak_temperature_median_abs_error_k"],
+                f"{o['decision_matches_reference_best']}/{o['decisions']}",
+                f"{_fmt(o['decision_regret_mean_usd'], 1)} / {_fmt(o['decision_regret_max_usd'], 1)}",
+            ]
+        )
+    out += [_table(header, rows), "", "By scenario (`fixed`):", ""]
+    fixed = cf["modes"]["fixed"]["by_scenario"]
+    out.append(
+        _table(
+            [
+                "scenario",
+                "Brier",
+                "predicted safe → true failures",
+                "peak-T coverage",
+                "peak-T bias (K)",
+                "decision regret mean ($)",
+            ],
+            [
+                [
+                    s,
+                    v.get("brier"),
+                    f"{v.get('false_safe_branches')}/{v.get('predicted_safe_branches')}",
+                    v.get("peak_temperature_p10_p90_coverage"),
+                    v.get("peak_temperature_median_bias_k"),
+                    v.get("decision_regret_mean_usd"),
+                ]
+                for s, v in fixed.items()
+            ],
+        )
+    )
+    by_state = cf["modes"]["fixed"].get("by_fault_state")
+    if by_state:
+        out += [
+            "",
+            "By fault state at the decision point (`fixed`). *Latent* means the fault is scheduled "
+            "but has not started, so no telemetry can reveal it yet; *active* is the fair test of "
+            "the estimator:",
+            "",
+            _table(
+                [
+                    "fault state",
+                    "decision points",
+                    "Brier",
+                    "predicted safe → true failures",
+                    "peak-T coverage",
+                    "peak-T median |error| (K)",
+                    "decision regret mean ($)",
+                ],
+                [
+                    [
+                        s,
+                        v.get("decisions"),
+                        v.get("brier"),
+                        f"{v.get('false_safe_branches')}/{v.get('predicted_safe_branches')}",
+                        v.get("peak_temperature_p10_p90_coverage"),
+                        v.get("peak_temperature_median_abs_error_k"),
+                        v.get("decision_regret_mean_usd"),
+                    ]
+                    for s, v in by_state.items()
+                    if v
+                ],
+            ),
+        ]
+    for mode, block in cf["modes"].items():
+        cases = block.get("false_safe_cases") or []
+        if cases:
+            out += ["", f"Predicted-safe branches that fail in the true process (`{mode}`):", ""]
+            out += [
+                f"- {c['case']} · {c['action']} · true failure rate {c['true_failure_rate']:.2f}"
+                + (
+                    f" · fault {c['fault_state']} (onset {c['fault_onset_min']:.0f} min)"
+                    if c.get("fault_state") and c.get("fault_onset_min") is not None
+                    else ""
+                )
+                for c in cases
+            ]
+    out += [
+        "",
+        "'Predicted safe → true failures' counts branches where the estimated ensemble shows no "
+        "failure (what the verifier's failure_risk check requires) but some true-process "
+        "realisations fail. The Brier score is computed against every true-process realisation; "
+        "'true state' is the irreducible score of a predictor that knows the hidden state. Peak-T "
+        "coverage is the share of true realisations whose peak winding temperature falls inside "
+        "the ensemble's 10–90 % band (nominal 0.8). Decision regret prices the estimated "
+        "ensemble's lowest-objective action under the true-state reference (not verifier-gated).",
+        "",
+    ]
+    return out
+
+
+def _closed_loop(iv: dict, notes: bool = True) -> list[str]:
+    out = [
+        f"{len(iv['scenarios'])} scenarios × {len(iv['seeds'])} held-out seeds "
+        f"({iv['seeds'][0]}–{iv['seeds'][-1]}) × {iv['episode_hours']:.0f} h per episode. "
+        f"{iv['approval_note']}",
         "",
     ]
     rows = []
@@ -278,12 +434,15 @@ def render_markdown(ev: dict) -> str:
             ],
         )
     )
-    out += ["", "Policies:"]
-    out += [f"- `{k}`: {v}" for k, v in iv["policy_notes"].items()]
+    if notes:
+        out += ["", "Policies:"]
+        out += [f"- `{k}`: {v}" for k, v in iv["policy_notes"].items()]
     out.append("")
+    return out
 
-    ag = ev["agent"]
-    out += ["## 6. Agent reliability", ""]
+
+def _agent_section(ag: dict) -> list[str]:
+    out: list[str] = []
     d = ag["deterministic"]
     if d.get("runs"):
         out.append(
@@ -372,11 +531,12 @@ def render_markdown(ev: dict) -> str:
         ]
     else:
         out.append(f"Live model evaluation: **not run** — {live.get('reason')}")
-    recheck = ag.get("live_recheck") or {}
-    if recheck.get("status") == "run" and recheck.get("arms"):
-        out += ["", "### Re-check after verifier fixes", ""]
-        out += _live_arms_section(recheck)
-    out += ["", "## 7. Limitations", ""]
-    out += [f"- {x}" for x in ev["limitations"]]
-    out.append("")
-    return "\n".join(out)
+    for key, title in (
+        ("live_recheck", "Re-check after verifier fixes"),
+        ("live_v4", "Re-check on verifier v4 with the information gate"),
+    ):
+        block = ag.get(key) or {}
+        if block.get("status") == "run" and block.get("arms"):
+            out += ["", f"### {title}", ""]
+            out += _live_arms_section(block)
+    return out

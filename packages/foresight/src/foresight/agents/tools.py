@@ -22,7 +22,13 @@ from foresight.branching import (
 from foresight.prediction.schemas import EvidenceItem, RiskAssessment
 from foresight.simulation import Action, MotorTwin
 from foresight.telemetry import CHANNELS, TelemetrySample
-from foresight.verification import Proposal, VerificationResult, verify_independently
+from foresight.verification import (
+    InformationAssessment,
+    Proposal,
+    VerificationResult,
+    assess_information_value,
+    verify_independently,
+)
 
 
 class ToolError(ValueError):
@@ -39,6 +45,8 @@ class AgentSnapshot:
     oracle_twin: MotorTwin | None = None  # never exposed to the model
     # "oracle" plans from the hidden true state; only used by the evaluation upper bound.
     planning_state_source: Literal["estimated", "oracle"] = "estimated"
+    # Defer a verified action when its risk rests on unsupported trends and waiting is safe.
+    information_gathering: bool = True
 
 
 def action_from_flat(d: Any) -> Action:
@@ -91,6 +99,7 @@ class ToolExecutor:
     comparisons: dict[str, FutureComparison] = field(default_factory=dict)
     verifications: list[VerificationResult] = field(default_factory=list)
     estimate: StateEstimate | None = None
+    information: InformationAssessment | None = None
 
     def __post_init__(self) -> None:
         self.evidence: dict[str, EvidenceItem] = {
@@ -293,6 +302,16 @@ class ToolExecutor:
         )
         self.verifications.append(result)
         return result
+
+    async def tool_assess_information_value(self) -> tuple[str, dict]:
+        if self.snapshot.planning_state_source == "oracle":
+            raise ToolError("information value is only defined for the estimated state")
+        est = self._ensure_estimate()
+        if self.information is None:
+            self.information = await asyncio.to_thread(
+                assess_information_value, est, self.horizon_min
+            )
+        return (self.information.summary, self.information.model_dump())
 
     async def tool_verify_intervention(
         self, action: dict, claimed_failure_mode: str = "unknown"
