@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from foresight.branching import ACTION_ADAPTER, FutureComparison, compare_futures
+from foresight.branching import ACTION_ADAPTER, BranchOutcome, FutureComparison, compare_futures
 from foresight.prediction.schemas import RiskAssessment
 from foresight.simulation import (
     DEFAULT_MOTOR,
@@ -40,7 +40,7 @@ class SafetyPolicy(BaseModel):
     max_branch_vibration_mm_s: float = DEFAULT_MOTOR.vibration_trip_mm_s - 1.0
     max_continuous_load: float = DEFAULT_MOTOR.max_safe_load_fraction
     max_failure_incidence: float = 0.0
-    max_failure_upper_ci: float = 0.40
+    max_failure_upper_ci: float = 0.25
     min_members: int = 8
     max_temperature_spread_k: float = 20.0
     reduce_load_range: tuple[float, float] = (0.05, 0.5)
@@ -49,7 +49,8 @@ class SafetyPolicy(BaseModel):
     inspection_delay_range_min: tuple[float, float] = (0.0, 480.0)
     inspection_lead_margin_min: float = 15.0
     max_state_age_s: float = 600.0
-    confirmation_members: int = 16
+    confirmation_members: int = 32
+    bearing_confirmation_members: int = 48
     # Reject consequential actions that neither lower the objective nor prevent a simulated
     # failure. False reproduces the pre-red-team verifier, which only warned.
     block_no_benefit: bool = True
@@ -186,6 +187,7 @@ def independent_confirmation(
     comparison: FutureComparison | None,
     oracle_twin: MotorTwin | None = None,
     policy: SafetyPolicy = DEFAULT_POLICY,
+    claimed_mode: str = "unknown",
 ) -> FutureComparison | None:
     """Re-simulate a proposed action from the comparison's initial state with verifier-owned seeds.
 
@@ -206,10 +208,18 @@ def independent_confirmation(
         if comparison.estimate is None:
             return None
         source = {"state_source": "estimated", "estimate": comparison.estimate}
+    n_members = (
+        policy.bearing_confirmation_members
+        if (
+            claimed_mode == "bearing"
+            or any("bearing" in m for b in comparison.branches for m in b.failure_modes)
+        )
+        else policy.confirmation_members
+    )
     return compare_futures(
         [action],
         horizon_min=comparison.horizon_min,
-        n_members=policy.confirmation_members,
+        n_members=n_members,
         base_seed=CONFIRMATION_BASE_SEED,
         **source,
     )
@@ -245,11 +255,79 @@ def _check_confirmation(
         blocking=True,
         detail=(
             f"Verifier re-simulation with {branch.n_members} independent members: failure "
-            f"incidence {branch.failure_incidence:.0%} (95 % CI {lo:.2f}–{hi:.2f}), p90 peak "
-            f"{branch.peak_temperature_p90_c:.1f} °C / {branch.peak_vibration_p90_mm_s:.2f} mm/s"
+            f"incidence {branch.failure_incidence:.0%} (95 % CI [{lo:.3f}, {hi:.3f}]), p90 peak "
+            f"{branch.peak_temperature_p90_c:.1f} °C / {branch.peak_vibration_p90_mm_s:.2f} mm/s "
+            f"(ISO 10816-3 RMS). Note: 0 observed failures bounds tail risk statistically at <{hi:.1%}, "
+            f"but {branch.n_members} Monte Carlo samples cannot guarantee elimination of rare tail-risk events."
         ),
         measured=round(branch.failure_incidence, 3),
         limit=policy.max_failure_incidence,
+    )
+
+
+def _check_vibration_trajectory(
+    action: Action,
+    branch: BranchOutcome,
+    policy: SafetyPolicy,
+    claimed_mode: str = "unknown",
+) -> CheckResult:
+    band = branch.vibration_band
+    p90_series = band.p90
+    if not p90_series:
+        return CheckResult(
+            name="vibration_trajectory",
+            status="pass",
+            blocking=True,
+            detail="No vibration trajectory data available",
+        )
+
+    max_p90 = max(p90_series)
+    if max_p90 > policy.max_branch_vibration_mm_s:
+        bad_idx = next(i for i, v in enumerate(p90_series) if v > policy.max_branch_vibration_mm_s)
+        t_breach = band.t_min[bad_idx] if bad_idx < len(band.t_min) else 0.0
+        return CheckResult(
+            name="vibration_trajectory",
+            status="fail",
+            blocking=True,
+            detail=(
+                f"Complete vibration trajectory breaches safe operating limit: 90th percentile reaches "
+                f"{max_p90:.2f} mm/s at T+{t_breach:.0f} min (limit {policy.max_branch_vibration_mm_s:.2f} mm/s, "
+                f"ISO 10816-3 velocity RMS)"
+            ),
+            measured=round(max_p90, 2),
+            limit=policy.max_branch_vibration_mm_s,
+        )
+
+    is_bearing = claimed_mode == "bearing" or any("bearing" in m for m in branch.failure_modes)
+    is_pure_derate = isinstance(action, (ReduceLoad, ReduceSpeed))
+    if is_bearing and is_pure_derate:
+        v_start = p90_series[0]
+        v_end = p90_series[-1]
+        v_alarm = DEFAULT_MOTOR.vibration_alarm_mm_s
+        if (v_end >= v_alarm and v_end > v_start + 0.3) or (v_end > v_start + 0.5):
+            return CheckResult(
+                name="vibration_trajectory",
+                status="fail",
+                blocking=True,
+                detail=(
+                    f"Bearing defect trajectory continues upward unabated under pure derating: "
+                    f"starts at {v_start:.2f} mm/s and reaches {v_end:.2f} mm/s (increasing toward/exceeding ISO alarm threshold "
+                    f"{v_alarm:.1f} mm/s). Mechanical damage requires scheduled inspection or controlled shutdown."
+                ),
+                measured=round(v_end, 2),
+                limit=v_alarm,
+            )
+
+    return CheckResult(
+        name="vibration_trajectory",
+        status="pass",
+        blocking=True,
+        detail=(
+            f"Vibration trajectory remains bounded across all {len(p90_series)} time slices: "
+            f"max p90 {max_p90:.2f} mm/s (limit {policy.max_branch_vibration_mm_s:.2f} mm/s, ISO 10816-3)"
+        ),
+        measured=round(max_p90, 2),
+        limit=policy.max_branch_vibration_mm_s,
     )
 
 
@@ -319,6 +397,11 @@ def verify(
                 detail="90th-percentile peak vibration while running",
                 measured=round(branch.peak_vibration_p90_mm_s, 2),
                 limit=policy.max_branch_vibration_mm_s,
+            )
+        )
+        checks.append(
+            _check_vibration_trajectory(
+                action, branch, policy, claimed_mode=proposal.claimed_failure_mode
             )
         )
         checks.append(
@@ -430,7 +513,13 @@ def verify_independently(
     """Full verification: the proposer's comparison plus the verifier's own re-simulation.
 
     CPU-bound (one extra ensemble); call it via asyncio.to_thread from async code."""
-    confirmation = independent_confirmation(proposal.action, comparison, oracle_twin, policy)
+    confirmation = independent_confirmation(
+        proposal.action,
+        comparison,
+        oracle_twin,
+        policy,
+        claimed_mode=proposal.claimed_failure_mode,
+    )
     return verify(
         proposal,
         comparison,
