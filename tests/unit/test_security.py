@@ -114,7 +114,9 @@ async def test_active_judge_session_preservation(small_bundle):
 @pytest.mark.asyncio
 async def test_sliding_window_rate_limiter():
     rules = {
-        "general": RateLimitRule(max_requests=3, window_s=2.0, description="Test rate limit (3/2s)"),
+        "general": RateLimitRule(
+            max_requests=3, window_s=2.0, description="Test rate limit (3/2s)"
+        ),
     }
     limiter = SlidingWindowRateLimiter(rules=rules, enabled=True)
     ip = "192.168.1.10"

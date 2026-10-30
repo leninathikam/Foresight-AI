@@ -21,11 +21,21 @@ class RateLimitRule:
 
 # Endpoint-specific rate limits per client IP
 DEFAULT_RULES: dict[str, RateLimitRule] = {
-    "agent_runs": RateLimitRule(max_requests=10, window_s=60.0, description="Agent runs (max 10/min)"),
-    "model_check": RateLimitRule(max_requests=6, window_s=60.0, description="Model connectivity check (max 6/min)"),
-    "futures": RateLimitRule(max_requests=20, window_s=60.0, description="Future simulation branches (max 20/min)"),
-    "create_session": RateLimitRule(max_requests=15, window_s=3600.0, description="Session creation (max 15/hr)"),
-    "general": RateLimitRule(max_requests=180, window_s=60.0, description="General API requests (max 180/min)"),
+    "agent_runs": RateLimitRule(
+        max_requests=10, window_s=60.0, description="Agent runs (max 10/min)"
+    ),
+    "model_check": RateLimitRule(
+        max_requests=6, window_s=60.0, description="Model connectivity check (max 6/min)"
+    ),
+    "futures": RateLimitRule(
+        max_requests=20, window_s=60.0, description="Future simulation branches (max 20/min)"
+    ),
+    "create_session": RateLimitRule(
+        max_requests=15, window_s=3600.0, description="Session creation (max 15/hr)"
+    ),
+    "general": RateLimitRule(
+        max_requests=180, window_s=60.0, description="General API requests (max 180/min)"
+    ),
 }
 
 
@@ -47,7 +57,9 @@ class SlidingWindowRateLimiter:
             return "create_session"
         return "general"
 
-    async def is_allowed(self, client_ip: str, path: str, method: str) -> tuple[bool, str | None, float]:
+    async def is_allowed(
+        self, client_ip: str, path: str, method: str
+    ) -> tuple[bool, str | None, float]:
         if not self.enabled:
             return True, None, 0.0
 
@@ -75,7 +87,9 @@ class SlidingWindowRateLimiter:
             for ip in list(self._history.keys()):
                 for cat in list(self._history[ip].keys()):
                     rule = self.rules.get(cat, self.rules["general"])
-                    self._history[ip][cat] = [t for t in self._history[ip][cat] if t > now - rule.window_s]
+                    self._history[ip][cat] = [
+                        t for t in self._history[ip][cat] if t > now - rule.window_s
+                    ]
                     if not self._history[ip][cat]:
                         del self._history[ip][cat]
                 if not self._history[ip]:
@@ -109,7 +123,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if not allowed:
             return JSONResponse(
                 status_code=429,
-                content={"detail": f"Rate limit exceeded: {desc}. Please retry after {retry_after}s."},
+                content={
+                    "detail": f"Rate limit exceeded: {desc}. Please retry after {retry_after}s."
+                },
                 headers={"Retry-After": str(int(retry_after))},
             )
 

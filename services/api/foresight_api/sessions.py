@@ -13,7 +13,13 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from foresight.agents import AgentOrchestrator, AgentSnapshot, AgentTrace, MetaModelClient
+from foresight.agents import (
+    AgentOrchestrator,
+    AgentSnapshot,
+    AgentTrace,
+    LLMBudgetManager,
+    MetaModelClient,
+)
 from foresight.branching import (
     ACTION_ADAPTER,
     ActuatorSettings,
@@ -69,7 +75,13 @@ def compact_sample(s: TelemetrySample) -> dict:
 
 class LiveSession:
     def __init__(
-        self, scenario: ScenarioId, seed: int, bundle: RiskBundle, settings: Settings, speed: float
+        self,
+        scenario: ScenarioId,
+        seed: int,
+        bundle: RiskBundle,
+        settings: Settings,
+        speed: float,
+        budget_manager: LLMBudgetManager | None = None,
     ) -> None:
         self.id = f"s-{uuid.uuid4().hex[:8]}"
         self.owner_token = secrets.token_urlsafe(32)
@@ -79,6 +91,7 @@ class LiveSession:
         self.scenario = scenario
         self.seed = seed
         self.settings = settings
+        self.budget_manager = budget_manager
         self.created_at = datetime.now(UTC).isoformat(timespec="seconds")
         self.last_active = time.monotonic()
         # The machine starts healthy; the scenario's fault is injected on demand.
@@ -306,7 +319,9 @@ class LiveSession:
                 self.paused, self.pause_reason = False, None
             elif action == "set_speed":
                 if speed is None or not 1 <= speed <= 600:
-                    raise SessionError("speed must be between 1 and 600 simulated seconds per second")
+                    raise SessionError(
+                        "speed must be between 1 and 600 simulated seconds per second"
+                    )
                 self.speed = speed
             status = self.status()
             self._broadcast({"type": "status", "data": status})
@@ -443,7 +458,13 @@ class LiveSession:
                     }
                 )
 
-            orchestrator = AgentOrchestrator(snapshot, self.settings, llm=llm, on_update=on_update)
+            orchestrator = AgentOrchestrator(
+                snapshot,
+                self.settings,
+                llm=llm,
+                on_update=on_update,
+                budget_manager=self.budget_manager,
+            )
             self.agent_runs[orchestrator.trace.run_id] = orchestrator.trace
             self.busy = "agent reasoning (simulation clock paused)"
             self._broadcast({"type": "status", "data": self.status()})
@@ -539,6 +560,10 @@ class SessionManager:
         self.bundle = bundle
         self.settings = settings
         self.sessions: dict[str, LiveSession] = {}
+        self.budget_manager = LLMBudgetManager(
+            total_budget_usd=settings.llm_total_budget_usd,
+            session_budget_usd=settings.llm_session_budget_usd,
+        )
 
     async def create(self, scenario: ScenarioId, seed: int, speed: float | None) -> LiveSession:
         await self.cleanup()
@@ -559,6 +584,7 @@ class SessionManager:
             self.bundle,
             self.settings,
             speed or self.settings.default_sim_speed,
+            self.budget_manager,
         )
         session.start()
         self.sessions[session.id] = session
@@ -576,6 +602,7 @@ class SessionManager:
         session = self.sessions.pop(session_id, None)
         if session:
             await session.stop()
+            await self.budget_manager.cleanup_session(session_id)
 
     async def cleanup(self) -> None:
         now = time.monotonic()

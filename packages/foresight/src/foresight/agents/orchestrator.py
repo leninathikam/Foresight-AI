@@ -21,6 +21,12 @@ from typing import Any
 from pydantic import ValidationError
 
 from foresight.agents import prompts
+from foresight.agents.budget import (
+    BudgetExceededError,
+    LLMBudgetManager,
+    calculate_actual_cost,
+    estimate_call_cost,
+)
 from foresight.agents.llm import LLMError, LLMResponse, MetaModelClient
 from foresight.agents.schemas import (
     ALLOWED_TRANSITIONS,
@@ -111,11 +117,13 @@ class AgentOrchestrator:
         settings: Settings,
         llm: MetaModelClient | None = None,
         on_update: Callable[[AgentTrace], None] | None = None,
+        budget_manager: LLMBudgetManager | None = None,
     ) -> None:
         self.snapshot = snapshot
         self.settings = settings
         self.llm = llm
         self.on_update = on_update
+        self.budget_manager = budget_manager
         self.tools = ToolExecutor(snapshot)
         self._seq = 0
         self._start = time.perf_counter()
@@ -132,6 +140,7 @@ class AgentOrchestrator:
             stage_history=[AgentStage.OBSERVE],
         )
         if llm is None:
+            self.trace.fallback_reason = "not_configured"
             self.trace.notice = (
                 "No model provider is configured: hypotheses and planning come from a "
                 "deterministic rule-based planner, not from a Meta model."
@@ -161,16 +170,19 @@ class AgentOrchestrator:
         self._publish()
         return step
 
-    def _account(self, resp: LLMResponse) -> None:
+    def _account(self, resp: LLMResponse, actual_cost: float | None = None) -> None:
         u = self.trace.usage
         u.llm_calls += 1
         u.input_tokens += resp.input_tokens
         u.cached_input_tokens += resp.cached_input_tokens
         u.output_tokens += resp.output_tokens
         assert self.llm is not None
-        u.estimated_cost_usd = round(
-            self.llm.cost_usd(u.input_tokens, u.cached_input_tokens, u.output_tokens), 6
-        )
+        if actual_cost is not None:
+            u.estimated_cost_usd = round(u.estimated_cost_usd + actual_cost, 6)
+        else:
+            u.estimated_cost_usd = round(
+                self.llm.cost_usd(u.input_tokens, u.cached_input_tokens, u.output_tokens), 6
+            )
 
     async def _tool(self, name: str, args: dict) -> tuple[bool, dict, str]:
         start = time.perf_counter()
@@ -248,18 +260,31 @@ class AgentOrchestrator:
         if self.llm is not None:
             try:
                 accepted = await self._llm_path()
-            except LLMError as exc:
-                self._step("error", "llm_unavailable", result_summary=str(exc), ok=False)
+            except (LLMError, BudgetExceededError) as exc:
+                fallback_reason = (
+                    "budget_exceeded" if isinstance(exc, BudgetExceededError) else "llm_error"
+                )
+                step_name = (
+                    "budget_exceeded" if fallback_reason == "budget_exceeded" else "llm_unavailable"
+                )
+                self._step("error", step_name, result_summary=str(exc), ok=False)
+                self.trace.fallback_reason = fallback_reason
                 self.trace.notice = (
-                    f"Model call to {self.llm.config.label} failed ({exc}); continued with the "
+                    f"LLM budget limit reached ({exc}); continued with the deterministic planner."
+                    if fallback_reason == "budget_exceeded"
+                    else f"Model call to {self.llm.config.label} failed ({exc}); continued with the "
                     "deterministic planner."
                 )
-                self.trace.provider = f"{self.llm.provider} → deterministic-planner fallback"
+                self.trace.provider = f"{self.llm.provider} → deterministic-planner fallback ({fallback_reason.replace('_', ' ')})"
                 accepted = None
                 if not self.trace.hypotheses:
                     self._deterministic_hypotheses()
             if accepted is None:
-                accepted = await self._optimizer_fallback()
+                accepted = await self._optimizer_fallback(
+                    selected_by="deterministic_planner"
+                    if self.llm is None
+                    else "optimizer_fallback"
+                )
         else:
             self._deterministic_hypotheses()
             accepted = await self._optimizer_fallback(selected_by="deterministic_planner")
@@ -319,8 +344,37 @@ class AgentOrchestrator:
 
     async def _llm_call(self, name: str, **kwargs) -> LLMResponse:
         assert self.llm is not None
-        resp = await self.llm.create_response(instructions=prompts.SYSTEM_INSTRUCTIONS, **kwargs)
-        self._account(resp)
+        est_cost = estimate_call_cost(
+            self.llm.config, kwargs.get("input", ""), kwargs.get("max_output_tokens", 4000)
+        )
+        actual_cost: float | None = None
+        if self.budget_manager is not None:
+            async with self.budget_manager.reservation_context(
+                session_id=self.snapshot.session_id,
+                estimated_usd=est_cost,
+                provider=self.llm.provider,
+            ) as ctrl:
+                resp = await self.llm.create_response(
+                    instructions=prompts.SYSTEM_INSTRUCTIONS, **kwargs
+                )
+                actual_cost = calculate_actual_cost(
+                    self.llm.config,
+                    resp,
+                    kwargs.get("input", ""),
+                    kwargs.get("max_output_tokens", 4000),
+                )
+                ctrl.commit(actual_cost)
+        else:
+            resp = await self.llm.create_response(
+                instructions=prompts.SYSTEM_INSTRUCTIONS, **kwargs
+            )
+            actual_cost = calculate_actual_cost(
+                self.llm.config,
+                resp,
+                kwargs.get("input", ""),
+                kwargs.get("max_output_tokens", 4000),
+            )
+        self._account(resp, actual_cost=actual_cost)
         self._step(
             "llm_call",
             name,

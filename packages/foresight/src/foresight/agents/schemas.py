@@ -145,3 +145,6 @@ class AgentTrace(BaseModel):
     usage: AgentUsage = Field(default_factory=AgentUsage)
     error: str | None = None
     notice: str | None = None
+    fallback_reason: Literal["budget_exceeded", "llm_error", "not_configured", "timeout"] | None = (
+        None
+    )

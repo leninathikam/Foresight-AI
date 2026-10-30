@@ -1,3 +1,10 @@
+from foresight.agents.budget import (
+    BudgetExceededError,
+    BudgetSummary,
+    LLMBudgetManager,
+    calculate_actual_cost,
+    estimate_call_cost,
+)
 from foresight.agents.llm import LLMError, MetaModelClient, ModelClient
 from foresight.agents.orchestrator import AgentOrchestrator
 from foresight.agents.schemas import AgentRecommendation, AgentStage, AgentTrace
@@ -9,9 +16,14 @@ __all__ = [
     "AgentSnapshot",
     "AgentStage",
     "AgentTrace",
+    "BudgetExceededError",
+    "BudgetSummary",
+    "LLMBudgetManager",
     "LLMError",
     "MetaModelClient",
     "ModelClient",
     "ToolExecutor",
     "action_from_flat",
+    "calculate_actual_cost",
+    "estimate_call_cost",
 ]

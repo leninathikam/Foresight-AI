@@ -1,5 +1,6 @@
 import type {
   Action,
+  BudgetSummary,
   AgentTrace,
   Diagnostics,
   FutureComparison,
@@ -166,4 +167,6 @@ export const api = {
     ),
   replayCheck: (id: string) =>
     request<ReplayCheck>(`/api/sessions/${id}/replay-check`, { timeoutMs: 120_000 }),
+  budget: () => request<BudgetSummary>("/api/budget"),
+  sessionBudget: (id: string) => request<BudgetSummary>(`/api/sessions/${id}/budget`),
 };

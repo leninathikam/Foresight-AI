@@ -356,10 +356,15 @@ export function AgentView() {
               <span className="flex flex-wrap items-center gap-2.5">
                 <span className="font-mono text-[13px]">Run {trace.run_id}</span>
                 <Badge tone={trace.status === "completed" ? "emerald" : trace.status === "failed" ? "rose" : "cyan"}>{trace.status}</Badge>
-                <Badge tone={trace.provider === "deterministic-planner" ? "slate" : "violet"}>
+                <Badge tone={trace.provider.includes("fallback") ? "amber" : trace.provider === "deterministic-planner" ? "slate" : "violet"}>
                   {trace.provider}
-                  {trace.model ? ` · ${trace.model.split("/").pop()}` : ""}
+                  {trace.model && !trace.provider.includes("fallback") ? ` · ${trace.model.split("/").pop()}` : ""}
                 </Badge>
+                {trace.fallback_reason && (
+                  <Badge tone="amber">
+                    Fallback: {trace.fallback_reason.replace("_", " ")}
+                  </Badge>
+                )}
                 {trace.reasoning_effort && trace.provider !== "deterministic-planner" && (
                   <Badge tone="slate">effort {trace.reasoning_effort}</Badge>
                 )}
@@ -385,6 +390,9 @@ export function AgentView() {
                   <div className="mt-1 font-mono text-[14px] tabular-nums text-slate-100">{v}</div>
                 </div>
               ))}
+            </div>
+            <div className="mt-2.5 text-[11px] text-slate-500 italic">
+              Note: Client-side pre-allocation reservation limit. Upstream spending caps require provider-side enforcement.
             </div>
           </Card>
 

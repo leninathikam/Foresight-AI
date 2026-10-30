@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     cors_origins: str = Field("http://localhost:3000", alias="FORESIGHT_CORS_ORIGINS")
     default_sim_speed: float = Field(60.0, alias="FORESIGHT_SIM_SPEED", gt=0, le=1000)
 
+    # Pre-allocation budget reservation limits (USD). None disables the ceiling.
+    llm_total_budget_usd: float | None = Field(10.0, alias="FORESIGHT_TOTAL_BUDGET_USD")
+    llm_session_budget_usd: float | None = Field(1.0, alias="FORESIGHT_SESSION_BUDGET_USD")
+
     # Published list prices (USD per 1M tokens) for cost accounting in traces. Meta's cached-input
     # price defaults to the full input price (conservative) unless set explicitly.
     price_input_per_m: float = Field(1.25, alias="FORESIGHT_PRICE_INPUT_PER_M")

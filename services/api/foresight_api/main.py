@@ -20,7 +20,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from foresight import __version__
-from foresight.agents import LLMError, ModelClient
+from foresight.agents import (
+    BudgetExceededError,
+    LLMBudgetManager,
+    LLMError,
+    ModelClient,
+    calculate_actual_cost,
+    estimate_call_cost,
+)
 from foresight.artifacts import MODEL_PATH, REPORTS_DIR, load_or_train_bundle
 from foresight.branching import ACTION_ADAPTER, OBJECTIVE_DEFINITION
 from foresight.config import PROVIDERS, ProviderConfig, ProviderName, Settings, get_settings
@@ -225,23 +232,33 @@ async def model_check(request: Request, provider: ProviderName | None = None):
         out["list_latency_ms"] = round((time.perf_counter() - start) * 1000, 1)
     except (LLMError, httpx.HTTPError) as exc:
         out["list_error"] = str(exc)
+    budget_mgr: LLMBudgetManager = request.app.state.sessions.budget_manager
+    est_cost = estimate_call_cost(llm.config, "Reply with the single word: ready", 1024)
     try:
         # Muse Spark always reasons, and reasoning tokens count toward max_output_tokens,
         # so a tiny cap can return an empty message.
-        resp = await llm.create_response(
-            input="Reply with the single word: ready", max_output_tokens=1024
-        )
-        out |= {
-            "ok": bool(resp.output_text.strip()),
-            "response_latency_ms": round(resp.latency_ms, 1),
-            "response_text": resp.output_text[:80],
-            "response_status": resp.status,
-            "input_tokens": resp.input_tokens,
-            "output_tokens": resp.output_tokens,
-        }
-        if not out["ok"]:
-            out["error"] = f"Model returned no text (status {resp.status})"
-    except LLMError as exc:
+        async with budget_mgr.reservation_context(
+            "system-diagnostics", est_cost, provider=name
+        ) as ctrl:
+            resp = await llm.create_response(
+                input="Reply with the single word: ready", max_output_tokens=1024
+            )
+            actual_cost = calculate_actual_cost(
+                llm.config, resp, "Reply with the single word: ready", 1024
+            )
+            ctrl.commit(actual_cost)
+            out |= {
+                "ok": bool(resp.output_text.strip()),
+                "response_latency_ms": round(resp.latency_ms, 1),
+                "response_text": resp.output_text[:80],
+                "response_status": resp.status,
+                "input_tokens": resp.input_tokens,
+                "output_tokens": resp.output_tokens,
+                "cost_usd": actual_cost,
+            }
+            if not out["ok"]:
+                out["error"] = f"Model returned no text (status {resp.status})"
+    except (LLMError, BudgetExceededError) as exc:
         out |= {"ok": False, "error": str(exc)}
     request.app.state.model_checks[name] = out
     return out
@@ -292,6 +309,21 @@ async def redteam():
             404, "No red-team report yet. Run: uv run python scripts/run_red_team.py"
         )
     return {"current": reports[-1], "history": reports[:-1]}
+
+
+@app.get("/api/budget")
+async def get_budget(request: Request):
+    """Service-wide LLM budget reservation and spend summary."""
+    manager: LLMBudgetManager = request.app.state.sessions.budget_manager
+    return (await manager.get_summary()).model_dump()
+
+
+@app.get("/api/sessions/{session_id}/budget")
+async def get_session_budget(request: Request, session_id: str):
+    """Session-specific LLM budget metrics (requires ownership token)."""
+    session = _session(request, session_id)
+    manager: LLMBudgetManager = request.app.state.sessions.budget_manager
+    return (await manager.get_summary(session.id)).model_dump()
 
 
 # ---------------------------------------------------------------------- sessions
@@ -446,7 +478,12 @@ async def start_agent(request: Request, session_id: str, body: AgentRunBody | No
         except LLMError as exc:
             raise HTTPException(422, str(exc)) from exc
     trace = await session.run_agent(llm)
-    return {"run_id": trace.run_id, "provider": trace.provider, "notice": trace.notice}
+    return {
+        "run_id": trace.run_id,
+        "provider": trace.provider,
+        "notice": trace.notice,
+        "fallback_reason": trace.fallback_reason,
+    }
 
 
 @app.get("/api/sessions/{session_id}/agent/runs/{run_id}")

@@ -381,6 +381,7 @@ export interface AgentTrace {
   usage: AgentUsage;
   error: string | null;
   notice: string | null;
+  fallback_reason?: "budget_exceeded" | "llm_error" | "not_configured" | "timeout" | null;
 }
 
 // ---------------------------------------------------------------- meta
@@ -433,4 +434,18 @@ export interface ReplayCheck {
   sim_time_s: number;
   interventions_replayed: number;
   compute_ms: number;
+}
+
+export interface BudgetSummary {
+  total_budget_usd: number | null;
+  total_spent_usd: number;
+  total_reserved_usd: number;
+  total_remaining_usd: number | null;
+  session_budget_usd: number | null;
+  session_spent_usd: number;
+  session_reserved_usd: number;
+  session_remaining_usd: number | null;
+  active_reservations_count: number;
+  spending_ceiling_guaranteed: boolean;
+  disclaimer: string;
 }
