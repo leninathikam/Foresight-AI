@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import hmac
 import logging
+import secrets
 import time
 import uuid
 from datetime import UTC, datetime
@@ -69,6 +72,10 @@ class LiveSession:
         self, scenario: ScenarioId, seed: int, bundle: RiskBundle, settings: Settings, speed: float
     ) -> None:
         self.id = f"s-{uuid.uuid4().hex[:8]}"
+        self.owner_token = secrets.token_urlsafe(32)
+        self._owner_hash = hashlib.sha256(self.owner_token.encode("utf-8")).hexdigest()
+        self._lock = asyncio.Lock()
+        self.llm_runs_count = 0
         self.scenario = scenario
         self.seed = seed
         self.settings = settings
@@ -107,11 +114,25 @@ class LiveSession:
     async def stop(self) -> None:
         if self._task:
             self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+            try:
+                if self._task.get_loop() is asyncio.get_running_loop():
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await self._task
+            except RuntimeError:
+                pass
 
     def touch(self) -> None:
         self.last_active = time.monotonic()
+
+    def verify_token(self, token: str | None) -> bool:
+        if not token or not isinstance(token, str):
+            return False
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        return hmac.compare_digest(token_hash, self._owner_hash)
+
+    def is_active(self) -> bool:
+        # A session is active if it has connected subscribers or was active within 10 minutes
+        return len(self._subscribers) > 0 or (time.monotonic() - self.last_active < 600.0)
 
     async def _run(self) -> None:
         while True:
@@ -248,9 +269,9 @@ class LiveSession:
             "model_version": self.engine.bundle.version,
         }
 
-    def snapshot(self) -> dict:
+    def snapshot(self, include_token: bool = False) -> dict:
         samples = list(self.stream.window)
-        return {
+        data = {
             "status": self.status(),
             "scenario": SCENARIOS[self.scenario].model_dump(),
             "samples": [compact_sample(s) for s in samples],
@@ -268,51 +289,56 @@ class LiveSession:
                 for r in self.agent_runs.values()
             ],
         }
+        if include_token:
+            data["owner_token"] = self.owner_token
+        return data
 
     # ------------------------------------------------------------------ controls
-    def control(
+    async def control(
         self, action: Literal["pause", "resume", "set_speed"], speed: float | None = None
     ) -> dict:
-        if action == "pause":
-            self.paused, self.pause_reason = True, "paused by user"
-        elif action == "resume":
-            if self.stream.twin.state.failed:
-                raise SessionError("Machine has failed; start a new session to continue")
-            self.paused, self.pause_reason = False, None
-        elif action == "set_speed":
-            if speed is None or not 1 <= speed <= 600:
-                raise SessionError("speed must be between 1 and 600 simulated seconds per second")
-            self.speed = speed
-        status = self.status()
-        self._broadcast({"type": "status", "data": status})
-        return status
+        async with self._lock:
+            if action == "pause":
+                self.paused, self.pause_reason = True, "paused by user"
+            elif action == "resume":
+                if self.stream.twin.state.failed:
+                    raise SessionError("Machine has failed; start a new session to continue")
+                self.paused, self.pause_reason = False, None
+            elif action == "set_speed":
+                if speed is None or not 1 <= speed <= 600:
+                    raise SessionError("speed must be between 1 and 600 simulated seconds per second")
+                self.speed = speed
+            status = self.status()
+            self._broadcast({"type": "status", "data": status})
+            return status
 
-    def inject_fault(self) -> dict:
-        if self.scenario is ScenarioId.HEALTHY:
-            raise SessionError("The healthy scenario has no fault to inject")
-        if self.fault_injected:
-            raise SessionError("Fault already injected in this session")
-        canonical = canonical_episode(self.scenario).fault
-        now = self.stream.t_s
-        update = canonical.model_dump(exclude_none=True)
-        for key in ("cooling_fouling_onset_s", "bearing_defect_onset_s", "overload_onset_s"):
-            if key in update:
-                update[key] = now
-        event = self.stream.inject_fault(
-            update, source="user", label=SCENARIOS[self.scenario].title.lower()
-        )
-        self.fault_injected = True
-        self._broadcast(
-            {
-                "type": "tick",
-                "data": {
-                    "samples": [],
-                    "events": [e.model_dump() for e in self._new_events()],
-                    "status": self.status(),
-                },
-            }
-        )
-        return event.model_dump()
+    async def inject_fault(self) -> dict:
+        async with self._lock:
+            if self.scenario is ScenarioId.HEALTHY:
+                raise SessionError("The healthy scenario has no fault to inject")
+            if self.fault_injected:
+                raise SessionError("Fault already injected in this session")
+            canonical = canonical_episode(self.scenario).fault
+            now = self.stream.t_s
+            update = canonical.model_dump(exclude_none=True)
+            for key in ("cooling_fouling_onset_s", "bearing_defect_onset_s", "overload_onset_s"):
+                if key in update:
+                    update[key] = now
+            event = self.stream.inject_fault(
+                update, source="user", label=SCENARIOS[self.scenario].title.lower()
+            )
+            self.fault_injected = True
+            self._broadcast(
+                {
+                    "type": "tick",
+                    "data": {
+                        "samples": [],
+                        "events": [e.model_dump() for e in self._new_events()],
+                        "status": self.status(),
+                    },
+                }
+            )
+            return event.model_dump()
 
     # ------------------------------------------------------------------ analysis
     def _require_assessment(self) -> RiskAssessment:
@@ -329,26 +355,27 @@ class LiveSession:
     async def run_futures(
         self, actions: list[Action], horizon_min: float, n_members: int, state_source: str
     ) -> FutureComparison:
-        if self.busy:
-            raise SessionError(f"Session busy: {self.busy}")
-        self.busy = "simulating futures"
-        self._broadcast({"type": "status", "data": self.status()})
-        try:
-            kwargs: dict[str, Any] = {
-                "horizon_min": horizon_min,
-                "n_members": n_members,
-                "base_seed": len(self.comparisons),
-            }
-            if state_source == "oracle":
-                kwargs |= {"state_source": "oracle", "oracle_twin": self.stream.twin.clone()}
-            else:
-                kwargs |= {"state_source": "estimated", "estimate": self.estimate()}
-            comp = await asyncio.to_thread(compare_futures, actions, **kwargs)
-        finally:
-            self.busy = None
+        async with self._lock:
+            if self.busy:
+                raise SessionError(f"Session busy: {self.busy}")
+            self.busy = "simulating futures"
             self._broadcast({"type": "status", "data": self.status()})
-        self.comparisons[comp.id] = comp
-        return comp
+            try:
+                kwargs: dict[str, Any] = {
+                    "horizon_min": horizon_min,
+                    "n_members": n_members,
+                    "base_seed": len(self.comparisons),
+                }
+                if state_source == "oracle":
+                    kwargs |= {"state_source": "oracle", "oracle_twin": self.stream.twin.clone()}
+                else:
+                    kwargs |= {"state_source": "estimated", "estimate": self.estimate()}
+                comp = await asyncio.to_thread(compare_futures, actions, **kwargs)
+            finally:
+                self.busy = None
+                self._broadcast({"type": "status", "data": self.status()})
+            self.comparisons[comp.id] = comp
+            return comp
 
     async def _verify(
         self, proposal: Proposal, comp: FutureComparison | None
@@ -368,70 +395,72 @@ class LiveSession:
     async def verify_action(
         self, action: Action, comparison_id: str | None, claimed_mode: str = "unknown"
     ) -> tuple[VerificationResult, str]:
-        comp = self.comparisons.get(comparison_id) if comparison_id else None
-        if comparison_id and comp is None:
-            raise SessionError(f"Unknown comparison {comparison_id}")
-        if comp is None:
-            comp = next(
-                (
-                    c
-                    for c in reversed(list(self.comparisons.values()))
-                    if c.branch_for_action(action)
-                ),
-                None,
+        async with self._lock:
+            comp = self.comparisons.get(comparison_id) if comparison_id else None
+            if comparison_id and comp is None:
+                raise SessionError(f"Unknown comparison {comparison_id}")
+            if comp is None:
+                comp = next(
+                    (
+                        c
+                        for c in reversed(list(self.comparisons.values()))
+                        if c.branch_for_action(action)
+                    ),
+                    None,
+                )
+            result = await self._verify(
+                Proposal(action=action, claimed_failure_mode=claimed_mode, source="user"),  # type: ignore[arg-type]
+                comp,
             )
-        result = await self._verify(
-            Proposal(action=action, claimed_failure_mode=claimed_mode, source="user"),  # type: ignore[arg-type]
-            comp,
-        )
-        vid = f"v-{uuid.uuid4().hex[:8]}"
-        self.verifications[vid] = result
-        return result, vid
+            vid = f"v-{uuid.uuid4().hex[:8]}"
+            self.verifications[vid] = result
+            return result, vid
 
     async def run_agent(self, llm: MetaModelClient | None) -> AgentTrace:
-        if self.busy:
-            raise SessionError(f"Session busy: {self.busy}")
-        assessment = self._require_assessment()
-        snapshot = AgentSnapshot(
-            session_id=self.id,
-            t_s=self.stream.t_s,
-            samples=list(self.stream.window)[-720:],
-            actuators=self.actuators(),
-            assessment=assessment,
-        )
-
-        def on_update(trace: AgentTrace) -> None:
-            self.agent_runs[trace.run_id] = trace
-            self._broadcast(
-                {
-                    "type": "agent",
-                    "data": {
-                        "run_id": trace.run_id,
-                        "stage": trace.stage,
-                        "status": trace.status,
-                        "steps": len(trace.steps),
-                    },
-                }
+        async with self._lock:
+            if self.busy:
+                raise SessionError(f"Session busy: {self.busy}")
+            assessment = self._require_assessment()
+            snapshot = AgentSnapshot(
+                session_id=self.id,
+                t_s=self.stream.t_s,
+                samples=list(self.stream.window)[-720:],
+                actuators=self.actuators(),
+                assessment=assessment,
             )
 
-        orchestrator = AgentOrchestrator(snapshot, self.settings, llm=llm, on_update=on_update)
-        self.agent_runs[orchestrator.trace.run_id] = orchestrator.trace
-        self.busy = "agent reasoning (simulation clock paused)"
-        self._broadcast({"type": "status", "data": self.status()})
-
-        async def _go() -> None:
-            try:
-                trace = await orchestrator.run()
-                # Keep the comparisons the agent produced so recommendations can be applied.
-                for cid, comp in orchestrator.tools.comparisons.items():
-                    self.comparisons[cid] = comp
+            def on_update(trace: AgentTrace) -> None:
                 self.agent_runs[trace.run_id] = trace
-            finally:
-                self.busy = None
-                self._broadcast({"type": "status", "data": self.status()})
+                self._broadcast(
+                    {
+                        "type": "agent",
+                        "data": {
+                            "run_id": trace.run_id,
+                            "stage": trace.stage,
+                            "status": trace.status,
+                            "steps": len(trace.steps),
+                        },
+                    }
+                )
 
-        self._agent_task = asyncio.create_task(_go())
-        return orchestrator.trace
+            orchestrator = AgentOrchestrator(snapshot, self.settings, llm=llm, on_update=on_update)
+            self.agent_runs[orchestrator.trace.run_id] = orchestrator.trace
+            self.busy = "agent reasoning (simulation clock paused)"
+            self._broadcast({"type": "status", "data": self.status()})
+
+            async def _go() -> None:
+                try:
+                    trace = await orchestrator.run()
+                    # Keep the comparisons the agent produced so recommendations can be applied.
+                    for cid, comp in orchestrator.tools.comparisons.items():
+                        self.comparisons[cid] = comp
+                    self.agent_runs[trace.run_id] = trace
+                finally:
+                    self.busy = None
+                    self._broadcast({"type": "status", "data": self.status()})
+
+            self._agent_task = asyncio.create_task(_go())
+            return orchestrator.trace
 
     # ------------------------------------------------------------------ interventions
     async def apply_intervention(
@@ -441,48 +470,49 @@ class LiveSession:
         source: Literal["user", "agent"],
         comparison_id: str | None,
     ) -> dict:
-        if self.busy:
-            raise SessionError(f"Session busy: {self.busy}")
-        if self.stream.twin.state.failed:
-            raise SessionError("Machine has failed; interventions are no longer possible")
-        consequential = not isinstance(action, ContinueOperation)
-        if consequential and not approved:
-            raise SessionError(
-                "Consequential interventions require explicit human approval (approved=true)"
-            )
-        verification = None
-        if source == "agent" and not comparison_id:
-            raise SessionError(
-                "Agent recommendations must reference the comparison they were verified on"
-            )
-        if comparison_id:
-            comp = self.comparisons.get(comparison_id)
-            if comp is None:
-                raise SessionError(f"Unknown comparison {comparison_id}")
-            verification = await self._verify(Proposal(action=action, source=source), comp)
-            if verification.verdict == "rejected":
+        async with self._lock:
+            if self.busy:
+                raise SessionError(f"Session busy: {self.busy}")
+            if self.stream.twin.state.failed:
+                raise SessionError("Machine has failed; interventions are no longer possible")
+            consequential = not isinstance(action, ContinueOperation)
+            if consequential and not approved:
                 raise SessionError(
-                    "Re-verification failed: " + "; ".join(verification.rejection_reasons)
+                    "Consequential interventions require explicit human approval (approved=true)"
                 )
-        event = self.stream.apply_action(action, source=source)
-        event.payload["approved_by_human"] = approved
-        event.payload["verified"] = verification is not None
-        if verification is None and consequential:
-            event.payload["note"] = "Operator command - not verified by the safety verifier"
-        self._broadcast(
-            {
-                "type": "tick",
-                "data": {
-                    "samples": [],
-                    "events": [e.model_dump() for e in self._new_events()],
-                    "status": self.status(),
-                },
+            verification = None
+            if source == "agent" and not comparison_id:
+                raise SessionError(
+                    "Agent recommendations must reference the comparison they were verified on"
+                )
+            if comparison_id:
+                comp = self.comparisons.get(comparison_id)
+                if comp is None:
+                    raise SessionError(f"Unknown comparison {comparison_id}")
+                verification = await self._verify(Proposal(action=action, source=source), comp)
+                if verification.verdict == "rejected":
+                    raise SessionError(
+                        "Re-verification failed: " + "; ".join(verification.rejection_reasons)
+                    )
+            event = self.stream.apply_action(action, source=source)
+            event.payload["approved_by_human"] = approved
+            event.payload["verified"] = verification is not None
+            if verification is None and consequential:
+                event.payload["note"] = "Operator command - not verified by the safety verifier"
+            self._broadcast(
+                {
+                    "type": "tick",
+                    "data": {
+                        "samples": [],
+                        "events": [e.model_dump() for e in self._new_events()],
+                        "status": self.status(),
+                    },
+                }
+            )
+            return {
+                "event": event.model_dump(),
+                "verification": verification.model_dump() if verification else None,
             }
-        )
-        return {
-            "event": event.model_dump(),
-            "verification": verification.model_dump() if verification else None,
-        }
 
     def replay_check(self) -> dict:
         """Re-run the session from its seed and intervention log; compare fingerprints."""
@@ -513,7 +543,15 @@ class SessionManager:
     async def create(self, scenario: ScenarioId, seed: int, speed: float | None) -> LiveSession:
         await self.cleanup()
         if len(self.sessions) >= MAX_SESSIONS:
-            raise SessionError("Too many active sessions; delete one first")
+            idle_sessions = [s for s in self.sessions.values() if not s.is_active()]
+            if idle_sessions:
+                oldest = min(idle_sessions, key=lambda s: s.last_active)
+                log.info("evicting idle session to make room", extra={"session_id": oldest.id})
+                await self.delete(oldest.id)
+            else:
+                raise SessionError(
+                    "Session capacity reached (all active sessions are in use). Please wait or retry shortly."
+                )
         session = await asyncio.to_thread(
             LiveSession,
             scenario,

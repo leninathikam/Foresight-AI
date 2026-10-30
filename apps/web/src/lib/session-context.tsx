@@ -10,7 +10,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import { api, ApiError } from "./api";
+import { api, ApiError, setStoredSessionToken } from "./api";
 import type {
   AgentStage,
   AgentTrace,
@@ -165,6 +165,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         window.localStorage.removeItem(STORAGE_KEY);
+        setStoredSessionToken(null);
         sessionIdRef.current = null;
         dispatch({ type: "cleared", error: "The previous session has expired." });
       } else {
@@ -192,7 +193,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     let closed = false;
     let hadError = false;
     void resyncFor(sessionId);
-    const es = new EventSource(api.streamUrl(sessionId));
+    const es = new EventSource(api.streamUrl(sessionId), { withCredentials: true } as EventSourceInit);
     es.onopen = () => {
       dispatch({ type: "connection", connection: "live", error: null });
       if (hadError) void resyncFor(sessionId);
@@ -223,6 +224,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const snap = await api.createSession(scenario, seed, speed);
     const id = snap.status.session_id;
     window.localStorage.setItem(STORAGE_KEY, id);
+    if (snap.owner_token) {
+      setStoredSessionToken(snap.owner_token);
+    }
     sessionIdRef.current = id;
     dispatch({ type: "loading", sessionId: id });
     dispatch({ type: "snapshot", snap, at: Date.now() });
@@ -234,6 +238,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const endSession = useCallback(async () => {
     const id = sessionIdRef.current;
     window.localStorage.removeItem(STORAGE_KEY);
+    setStoredSessionToken(null);
     sessionIdRef.current = null;
     dispatch({ type: "cleared" });
     if (id) await api.deleteSession(id).catch(() => undefined);

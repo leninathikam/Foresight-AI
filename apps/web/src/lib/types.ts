@@ -143,6 +143,7 @@ export interface SessionSnapshot {
   events: TelemetryEvent[];
   comparisons: string[];
   agent_runs: AgentRunSummary[];
+  owner_token?: string;
 }
 
 export interface TickMessage {

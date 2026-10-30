@@ -22,6 +22,22 @@ export const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"
 ).replace(/\/$/, "");
 
+const STORAGE_TOKEN_KEY = "foresight.session-token";
+
+export function setStoredSessionToken(token: string | null) {
+  if (typeof window === "undefined") return;
+  if (token) {
+    window.localStorage.setItem(STORAGE_TOKEN_KEY, token);
+  } else {
+    window.localStorage.removeItem(STORAGE_TOKEN_KEY);
+  }
+}
+
+export function getStoredSessionToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(STORAGE_TOKEN_KEY);
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -40,10 +56,19 @@ async function request<T>(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const headers = new Headers(rest.headers);
+    if (rest.body && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    const token = getStoredSessionToken();
+    if (token && !headers.has("X-Session-Token")) {
+      headers.set("X-Session-Token", token);
+    }
     const res = await fetch(`${API_BASE_URL}${path}`, {
       ...rest,
       signal: controller.signal,
-      headers: rest.body ? { "Content-Type": "application/json" } : undefined,
+      headers,
+      credentials: "include",
       cache: "no-store",
     });
     if (!res.ok) {

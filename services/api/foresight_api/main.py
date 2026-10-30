@@ -29,6 +29,7 @@ from foresight.prediction.features import FEATURE_DESCRIPTIONS
 from foresight.simulation import DEFAULT_ECONOMICS, DEFAULT_MOTOR, SCENARIOS, ScenarioId
 from foresight.verification import DEFAULT_POLICY
 from foresight_api.logging_setup import configure_logging
+from foresight_api.rate_limiter import RateLimitMiddleware, SlidingWindowRateLimiter
 from foresight_api.sessions import LiveSession, SessionError, SessionManager, parse_action
 
 log = logging.getLogger("foresight.api")
@@ -85,11 +86,14 @@ def _provider_info(request: Request, p: ProviderConfig) -> dict:
 
 
 app = FastAPI(title="Foresight AI", version=__version__, lifespan=lifespan)
+rate_limiter = SlidingWindowRateLimiter(enabled=True)
+app.add_middleware(RateLimitMiddleware, limiter=rate_limiter)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().cors_origin_list,
-    allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Session-Token", "Authorization"],
 )
 
 
@@ -116,11 +120,31 @@ async def session_error_handler(_: Request, exc: SessionError):
     return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
-def _session(request: Request, session_id: str) -> LiveSession:
+def _verify_session_owner(request: Request, session: LiveSession) -> None:
+    # 1. Header: X-Session-Token or Authorization: Bearer <token>
+    token = request.headers.get("X-Session-Token")
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[len("Bearer ") :].strip()
+    # 2. Cookie: foresight_session_{session_id} or foresight_session_token
+    if not token:
+        token = request.cookies.get(f"foresight_session_{session.id}") or request.cookies.get(
+            "foresight_session_token"
+        )
+
+    if not session.verify_token(token):
+        raise HTTPException(403, "Session ownership verification failed")
+
+
+def _session(request: Request, session_id: str, require_owner: bool = True) -> LiveSession:
     try:
-        return request.app.state.sessions.get(session_id)
+        session = request.app.state.sessions.get(session_id)
     except KeyError:
         raise HTTPException(404, f"Session {session_id} not found") from None
+    if require_owner:
+        _verify_session_owner(request, session)
+    return session
 
 
 def _action(payload: dict) -> Any:
@@ -282,7 +306,23 @@ class CreateSession(BaseModel):
 @app.post("/api/sessions")
 async def create_session(request: Request, body: CreateSession):
     session = await request.app.state.sessions.create(body.scenario, body.seed, body.speed)
-    return session.snapshot()
+    snap = session.snapshot(include_token=True)
+    resp = JSONResponse(content=snap)
+    resp.set_cookie(
+        key=f"foresight_session_{session.id}",
+        value=session.owner_token,
+        path="/",
+        samesite="lax",
+        httponly=False,
+    )
+    resp.set_cookie(
+        key="foresight_session_token",
+        value=session.owner_token,
+        path="/",
+        samesite="lax",
+        httponly=False,
+    )
+    return resp
 
 
 @app.get("/api/sessions/{session_id}")
@@ -331,12 +371,12 @@ class ControlBody(BaseModel):
 
 @app.post("/api/sessions/{session_id}/control")
 async def control(request: Request, session_id: str, body: ControlBody):
-    return _session(request, session_id).control(body.action, body.speed)
+    return await _session(request, session_id).control(body.action, body.speed)
 
 
 @app.post("/api/sessions/{session_id}/inject")
 async def inject(request: Request, session_id: str):
-    return _session(request, session_id).inject_fault()
+    return await _session(request, session_id).inject_fault()
 
 
 @app.get("/api/sessions/{session_id}/assessment")
