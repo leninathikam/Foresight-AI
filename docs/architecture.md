@@ -12,37 +12,64 @@ It never connects to or controls real equipment. All telemetry comes from a dete
 
 ```mermaid
 flowchart TB
-    WEB["Web · apps/web (Next.js)<br/>Mission Control · Futures Lab · Agent · Evidence · Diagnostics"]
-
-    subgraph API["FastAPI · services/api"]
-        direction LR
-        SS["Sessions<br/>+ SSE stream"]
-        RUN["Agent runs<br/>futures · verify"]
-        AP["Interventions<br/>human approval"]
-        KEYS[("API keys<br/>server-side only")]
+    subgraph Web["Web Application · Next.js 16 (React 19)"]
+        UI["Mission Control · Futures Lab · Agent Intelligence<br/>Evidence & CWRU Benchmark · Diagnostics"]
     end
 
-    subgraph Core["foresight core · packages/foresight"]
+    subgraph API["FastAPI Service · services/api"]
         direction LR
-        TW["MotorTwin<br/>physics ODEs, seeded"] --> TE["TelemetryStream"] --> RE["RiskEngine<br/>IsolationForest · CUSUM · XGBoost"]
-        OR["AgentOrchestrator<br/>bounded state machine"] -->|"typed tools"| FB["Future Branching<br/>N members × K actions"] --> VF{{"Safety Verifier<br/>deterministic, LLM-free"}}
-        RE --> OR
-        OR -.->|fallback| PL["Deterministic planner"]
+        SS["Live Sessions<br/>SSE stream · LRU eviction"]
+        SEC["Security & Auth<br/>Session tokens · Sliding-window rate limiter"]
+        BUD["Budget Manager<br/>Atomic token reservations & quotas"]
     end
 
-    subgraph LLM["Muse Spark · Responses API"]
+    subgraph Core["Core Engine · packages/foresight"]
+        direction TB
+        subgraph TwinLayer["Physics Digital Twin & Telemetry"]
+            TW["MotorTwin<br/>15 kW motor ODEs · Seeded noise"] --> TE["TelemetryStream<br/>8,640-sample sliding window"]
+        end
+
+        subgraph PredictLayer["Prediction & Diagnostics"]
+            TE --> RE["RiskEngine<br/>Isolation Forest · CUSUM · Calibrated XGBoost (15/30/60m)"]
+            RE --> CLS["Fault Classifier<br/>Cooling · Bearing · Overload"]
+        end
+
+        subgraph AgentLayer["Bounded Agent Orchestration"]
+            OR["AgentOrchestrator<br/>Bounded state machine"]
+            PL["Deterministic Planner<br/>Fallback when unconfigured"]
+            OR -.->|fallback| PL
+        end
+
+        subgraph BranchLayer["Counterfactual Future Branching"]
+            SE["State Estimator<br/>OLS trend slopes + SE uncertainty"]
+            FB["Future Branching Engine<br/>N members × K actions · Common random numbers"]
+            SE --> FB
+        end
+
+        subgraph SafetyLayer["Safety Verification & Governance"]
+            VF{{"Safety Verifier v5<br/>11 checks · 32 fresh confirmation seeds · ISO 10816-3"}}
+            IG{{"Information Gate<br/>Trend test: t ≥ 2.0 before deferral"}}
+            VF -->|accepted| IG
+        end
+    end
+
+    subgraph LLM["Meta Muse Spark · Responses API"]
         direction LR
         META["Meta Model API<br/>muse-spark-1.3"]
         FW["Fireworks AI<br/>muse-spark-open"]
     end
 
-    WEB <--->|"REST + SSE"| API
-    SS --> TW
-    RUN --> OR
-    KEYS -.-> OR
-    OR <--->|"function tools + strict JSON"| LLM
-    VF -->|accepted| AP
-    AP -->|"approved action"| TW
+    %% Wiring
+    Web <--->|"REST + SSE (/api/*)"| API
+    API --> TW
+    RE --> OR
+    CLS --> OR
+    OR <--->|"typed tools + strict JSON"| LLM
+    OR -->|"compare_futures"| FB
+    FB --> VF
+    IG -->|gather telemetry| OR
+    IG -->|act now| HA["Operator Approval Gate"]
+    HA -->|"approved intervention"| TW
 ```
 
 The browser never sees an API key. Every number the agent reasons about comes from a tool call into local code, and nothing reaches the twin without passing the verifier and an operator approval.

@@ -22,29 +22,65 @@ Built for the **Meta Global AI Developer Hackathon 2026** (Indie / Push the Fron
 ## How it works
 
 ```mermaid
-flowchart LR
-    subgraph Web["Next.js UI"]
-        UI["Mission Control · Futures Lab<br/>Agent · Evidence · Diagnostics"]
+flowchart TB
+    subgraph Web["Web Application · Next.js 16 (React 19)"]
+        UI["Mission Control · Futures Lab · Agent Intelligence<br/>Evidence & CWRU Benchmark · Diagnostics"]
     end
-    subgraph API["FastAPI"]
-        S["Sessions + SSE"]
-        K[("API keys<br/>server-side")]
-    end
-    subgraph Core["foresight core"]
-        TW["Digital twin<br/>15 kW motor"] --> RK["Risk models<br/>IF · CUSUM · XGBoost"]
-        RK --> AG["Bounded agent"]
-        AG -->|"typed tools"| FB["Future Branching"]
-        FB --> VF{{"Safety verifier"}}
-        AG -.->|fallback| PL["Deterministic planner"]
-    end
-    LLM["Muse Spark<br/>Meta API · Fireworks"]
 
-    UI <--->|"REST + SSE"| S
-    S --> TW
-    K -.-> AG
-    AG <---> LLM
-    VF -->|accepted| HA["Operator approval"]
-    HA -->|"intervention"| TW
+    subgraph API["FastAPI Service · services/api"]
+        direction LR
+        SS["Live Sessions<br/>SSE stream · LRU eviction"]
+        SEC["Security & Auth<br/>Session tokens · Sliding-window rate limiter"]
+        BUD["Budget Manager<br/>Atomic token reservations & quotas"]
+    end
+
+    subgraph Core["Core Engine · packages/foresight"]
+        direction TB
+        subgraph TwinLayer["Physics Digital Twin & Telemetry"]
+            TW["MotorTwin<br/>15 kW motor ODEs · Seeded noise"] --> TE["TelemetryStream<br/>8,640-sample sliding window"]
+        end
+
+        subgraph PredictLayer["Prediction & Diagnostics"]
+            TE --> RE["RiskEngine<br/>Isolation Forest · CUSUM · Calibrated XGBoost (15/30/60m)"]
+            RE --> CLS["Fault Classifier<br/>Cooling · Bearing · Overload"]
+        end
+
+        subgraph AgentLayer["Bounded Agent Orchestration"]
+            OR["AgentOrchestrator<br/>Bounded state machine"]
+            PL["Deterministic Planner<br/>Fallback when unconfigured"]
+            OR -.->|fallback| PL
+        end
+
+        subgraph BranchLayer["Counterfactual Future Branching"]
+            SE["State Estimator<br/>OLS trend slopes + SE uncertainty"]
+            FB["Future Branching Engine<br/>N members × K actions · Common random numbers"]
+            SE --> FB
+        end
+
+        subgraph SafetyLayer["Safety Verification & Governance"]
+            VF{{"Safety Verifier v5<br/>11 checks · 32 fresh confirmation seeds · ISO 10816-3"}}
+            IG{{"Information Gate<br/>Trend test: t ≥ 2.0 before deferral"}}
+            VF -->|accepted| IG
+        end
+    end
+
+    subgraph LLM["Meta Muse Spark · Responses API"]
+        direction LR
+        META["Meta Model API<br/>muse-spark-1.3"]
+        FW["Fireworks AI<br/>muse-spark-open"]
+    end
+
+    %% Wiring
+    Web <--->|"REST + SSE (/api/*)"| API
+    API --> TW
+    RE --> OR
+    CLS --> OR
+    OR <--->|"typed tools + strict JSON"| LLM
+    OR -->|"compare_futures"| FB
+    FB --> VF
+    IG -->|gather telemetry| OR
+    IG -->|act now| HA["Operator Approval Gate"]
+    HA -->|"approved intervention"| TW
 ```
 
 The model only reasons over numbers returned by local tools, and every proposal must pass the deterministic verifier and an operator approval before it touches the (simulated) motor. More diagrams, including one agent run, the verifier decision tree and the red-team loop, are in [`docs/architecture.md`](docs/architecture.md).
