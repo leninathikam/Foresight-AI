@@ -45,7 +45,7 @@ From the verified artifact `artifacts/reports/evaluation.md`:
 ## 3. Agent Architecture & Orchestration Audit
 
 ### 3.1 Bounded State Machine Transition Flow
-The agent orchestrator enforces an explicit state transition matrix ([schemas.py#L25-L35](file:///E:/Hackathons/foresight-ai/packages/foresight/src/foresight/agents/schemas.py#L25-L35)):
+The agent orchestrator enforces an explicit state transition matrix ([schemas.py#L25-L35](../packages/foresight/src/foresight/agents/schemas.py#L25-L35)):
 
 $$\text{OBSERVE} \longrightarrow \text{ANALYZE} \longrightarrow \text{HYPOTHESIZE} \longrightarrow \text{INVESTIGATE} \longrightarrow \text{SIMULATE} \longrightarrow \text{VERIFY} \longrightarrow \text{RECOMMEND} \longrightarrow \text{DONE}$$
 
@@ -55,9 +55,9 @@ $$\text{OBSERVE} \longrightarrow \text{ANALYZE} \longrightarrow \text{HYPOTHESIZ
 - Verifier revisions are capped at 2 (`FORESIGHT_AGENT_MAX_REVISIONS = 2`).
 
 ### 3.2 Tool Calling & Grounding
-The agent has access to 9 typed tools ([prompts.py#L156-L270](file:///E:/Hackathons/foresight-ai/packages/foresight/src/foresight/agents/prompts.py#L156-L270)).
+The agent has access to 9 typed tools ([prompts.py#L156-L270](../packages/foresight/src/foresight/agents/prompts.py#L156-L270)).
 Crucially:
-- Tools execute synchronously or in worker threads on a **frozen session snapshot** ([tools.py#L40-L50](file:///E:/Hackathons/foresight-ai/packages/foresight/src/foresight/agents/tools.py#L40-L50)). The model cannot manipulate the live digital twin.
+- Tools execute synchronously or in worker threads on a **frozen session snapshot** ([tools.py#L40-L50](../packages/foresight/src/foresight/agents/tools.py#L40-L50)). The model cannot manipulate the live digital twin.
 - Sensor channels are validated against an enum.
 - `inspect_visual_evidence` returns an explicit `"unavailable"` status with an honest disclaimer: *"No camera or thermal-imaging source is configured for this simulated asset."*
 
@@ -80,8 +80,8 @@ From empirical benchmarks conducted across 126 runs on verifier v2, 28 runs on v
 
 ### Key Findings:
 1. **Regret & Action Selection:** Meta Muse Spark 1.3 consistently picks actions closer to the cost-optimal choice than Fireworks Muse Spark Open. At high effort on v2, Meta beat the deterministic planner by \$21.40 on average, whereas Fireworks tended to pick more conservative, costlier actions (e.g. immediate shutdown).
-2. **Hallucination Finding (Fireworks Open Weights):** In the v4 benchmark, Fireworks generated **44 unknown evidence IDs** in hypotheses across 2 of 14 runs ([evaluation.md#L346](file:///E:/Hackathons/foresight-ai/artifacts/reports/evaluation.md#L346)). The verifier successfully caught and filtered these before final submission.
-3. **Fallback Robustness:** In 4–6 of 21 runs per arm on v2, Meta ended without submitting a verified proposal within budget. In all cases, the system cleanly engaged `_optimizer_fallback` ([orchestrator.py#L557-L617](file:///E:/Hackathons/foresight-ai/packages/foresight/src/foresight/agents/orchestrator.py#L557-L617)), verified the top candidate, and delivered an approved action.
+2. **Hallucination Finding (Fireworks Open Weights):** In the v4 benchmark, Fireworks generated **44 unknown evidence IDs** in hypotheses across 2 of 14 runs ([evaluation.md#L346](../artifacts/reports/evaluation.md#L346)). The verifier successfully caught and filtered these before final submission.
+3. **Fallback Robustness:** In 4–6 of 21 runs per arm on v2, Meta ended without submitting a verified proposal within budget. In all cases, the system cleanly engaged `_optimizer_fallback` ([orchestrator.py#L557-L617](../packages/foresight/src/foresight/agents/orchestrator.py#L557-L617)), verified the top candidate, and delivered an approved action.
 
 ---
 

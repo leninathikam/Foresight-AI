@@ -74,7 +74,7 @@ Based on the official judging criteria for the Meta Global AI Developer Hackatho
 
 ## 5. Ideal 3-Minute Live Demonstration Path
 
-Follow [`docs/demo-script.md`](file:///E:/Hackathons/foresight-ai/docs/demo-script.md) verbatim:
+Follow [`docs/demo-script.md`](../docs/demo-script.md) verbatim:
 
 1. **Minute 0:00–0:45 (The Problem & Twin):**
    - Open Mission Control. Start `Cooling degradation`, Seed `7`.

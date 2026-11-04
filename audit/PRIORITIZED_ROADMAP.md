@@ -10,23 +10,35 @@
 ## 1. Roadmap Horizon Matrix
 
 ```mermaid
-timeline
-    title Foresight AI Engineering Upgrade Roadmap
-    section Immediate (0-12 Hours)
-      Tail-Risk Verifier Hardening (N=32) : Active
-      LRU Session Eviction : Active
-      API Rate Limiting : Active
-    section Next 24 Hours
-      API Key Token Auth : Planned
-      Async Lock on LiveSession : Planned
-      CWRU Bearing Benchmark Harness : Planned
-    section Next 72 Hours
-      SQLite / PostgreSQL Persistence : Planned
-      Adaptive Ensemble Sizing : Planned
-      Multi-Asset Mission Control : Planned
-    section Post-Hackathon
-      Physics-Informed Neural ODEs : Future
-      Live Industrial Modbus/MQTT Bridge : Future
+flowchart LR
+    subgraph H1["Immediate (0-12 Hours)"]
+        direction TB
+        T1["Tail-Risk Verifier Hardening (N=32)"]
+        T2["LRU Session Eviction"]
+        T3["API Rate Limiting"]
+    end
+
+    subgraph H2["Next 24 Hours"]
+        direction TB
+        T4["API Key Token Auth"]
+        T5["Async Lock on LiveSession"]
+        T6["CWRU Bearing Benchmark Harness"]
+    end
+
+    subgraph H3["Next 72 Hours"]
+        direction TB
+        T7["SQLite / PostgreSQL Persistence"]
+        T8["Adaptive Ensemble Sizing"]
+        T9["Multi-Asset Mission Control"]
+    end
+
+    subgraph H4["Post-Hackathon"]
+        direction TB
+        T10["Physics-Informed Neural ODEs"]
+        T11["Live Industrial Modbus/MQTT Bridge"]
+    end
+
+    H1 --> H2 --> H3 --> H4
 ```
 
 ---
@@ -38,7 +50,7 @@ timeline
 - **Evidence:** Documented in `artifacts/reports/redteam_v4.md` (Lines 50–55).
 - **Proposed Implementation:**
   1. Increase `SafetyPolicy.confirmation_members` from 16 to 32 (or adaptively 48 for bearing proposals).
-  2. In `_check_confirmation` ([verifier.py#L218-L255](file:///E:/Hackathons/foresight-ai/packages/foresight/src/foresight/verification/verifier.py#L218-L255)), compute the upper Wilson confidence bound: if upper 95% CI of failure incidence exceeds 0.10, require a larger confirmation sample.
+  2. In `_check_confirmation` ([verifier.py#L218-L255](../packages/foresight/src/foresight/verification/verifier.py#L218-L255)), compute the upper Wilson confidence bound: if upper 95% CI of failure incidence exceeds 0.10, require a larger confirmation sample.
 - **Technical Architecture:** Changes contained strictly in `verifier.py`.
 - **Complexity:** Low (≈15 lines of code).
 - **Expected Benefit:** Zero hard escapes in red-team round 4; mathematical tail-risk escape probability reduced from 71.2% to $<10\%$.
@@ -52,7 +64,7 @@ timeline
 - **Problem Being Solved:** `MAX_SESSIONS = 20` causes complete DoS when 20 sessions are created, rejecting subsequent requests with HTTP 409.
 - **Evidence:** `sessions.py` Line 42 and Lines 515–517.
 - **Proposed Implementation:**
-  In `SessionManager.create()` ([sessions.py#L513-L528](file:///E:/Hackathons/foresight-ai/services/api/foresight_api/sessions.py#L513-L528)), if `len(self.sessions) >= MAX_SESSIONS`, automatically identify and `await self.delete(oldest_session_id)` based on `session.last_active` monotonic timestamp.
+  In `SessionManager.create()` ([sessions.py#L513-L528](../services/api/foresight_api/sessions.py#L513-L528)), if `len(self.sessions) >= MAX_SESSIONS`, automatically identify and `await self.delete(oldest_session_id)` based on `session.last_active` monotonic timestamp.
 - **Complexity:** Very Low (≈10 lines of code).
 - **Expected Benefit:** Prevents DoS lockouts; eliminates user-facing HTTP 409 errors during public demo.
 - **Acceptance Criteria:** A script creating 25 consecutive sessions succeeds on all 25 calls, maintaining the 20 most recent sessions active.

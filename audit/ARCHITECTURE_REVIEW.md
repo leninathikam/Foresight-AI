@@ -102,9 +102,9 @@ sequenceDiagram
     participant FB as Future Branching (engine.py)
     participant VF as Verifier (verifier.py)
 
-    User->>UI: Select Scenario (e.g. cooling_degradation, seed 7) -> Start
+    User->>UI: Select Scenario (e.g. cooling_degradation, seed 7) : Start
     UI->>API: POST /api/sessions
-    API->>LS: LiveSession.start() -> spawns background _run() task
+    API->>LS: LiveSession.start() : spawns background _run() task
     loop Simulation Tick (every 0.5s wall time)
         LS->>TW: step(dt = speed * 0.5s)
         LS->>LS: stream.advance()
@@ -120,9 +120,9 @@ sequenceDiagram
     Note over LS,TW: Temperature and failure risk rise
     User->>UI: Click "Run Diagnosis" (Meta or Fireworks)
     UI->>API: POST /api/sessions/{id}/agent/runs
-    API->>LS: run_agent() -> freezes AgentSnapshot -> spawns AgentOrchestrator
-    AO->>AO: Transition: OBSERVE -> calls get_machine_state, get_sensor_history
-    AO->>AO: Transition: ANALYZE -> calls analyze_anomalies, predict_failure_risk
+    API->>LS: run_agent() : freezes AgentSnapshot : spawns AgentOrchestrator
+    AO->>AO: Transition: OBSERVE : calls get_machine_state, get_sensor_history
+    AO->>AO: Transition: ANALYZE : calls analyze_anomalies, predict_failure_risk
     AO->>AO: Transition: HYPOTHESIZE
     AO->>LLM: create_response(HYPOTHESIS_TASK, HYPOTHESIS_FORMAT)
     LLM-->>AO: Hypotheses + Candidate Interventions (Strict JSON)
@@ -135,7 +135,7 @@ sequenceDiagram
     AO->>VF: verify_independently(proposal, comparison)
     VF->>VF: Re-simulate proposal on 16 fresh seeds (base_seed=900)
     VF-->>AO: VerificationResult: accepted (all 11 checks pass)
-    AO->>AO: Transition: VERIFY -> RECOMMEND -> DONE
+    AO->>AO: Transition: VERIFY to RECOMMEND to DONE
     AO-->>LS: AgentTrace with verified recommendation
     LS-->>UI: SSE event: "agent" update
     UI->>User: Displays Verified Recommendation: "Inspection in 10 min" (Awaiting Approval)
@@ -166,12 +166,12 @@ sequenceDiagram
   This allows counterfactual cloning where alternate interventions experience *identical* environmental disturbances (Common Random Numbers).
 
 ### 3.2 State Estimation & Future Branching (`packages/foresight/src/foresight/branching/`)
-- **State Estimator ([estimation.py](file:///E:/Hackathons/foresight-ai/packages/foresight/src/foresight/branching/estimation.py#L1-L150)):** Infers unobservable latent states (cooling efficiency $\eta$, bearing damage $d$, process baseline load) from noisy telemetry using Ordinary Least Squares (OLS) regression over a 60-minute window. Reports standard errors for each fitted trend.
-- **Branching Engine ([engine.py](file:///E:/Hackathons/foresight-ai/packages/foresight/src/foresight/branching/engine.py#L1-L180)):** Clones an ensemble of $N$ members (default 8) across $K$ candidate actions. Evaluates each member against an explicit economic objective:
+- **State Estimator ([estimation.py](../packages/foresight/src/foresight/branching/estimation.py#L1-L150)):** Infers unobservable latent states (cooling efficiency $\eta$, bearing damage $d$, process baseline load) from noisy telemetry using Ordinary Least Squares (OLS) regression over a 60-minute window. Reports standard errors for each fitted trend.
+- **Branching Engine ([engine.py](../packages/foresight/src/foresight/branching/engine.py#L1-L180)):** Clones an ensemble of $N$ members (default 8) across $K$ candidate actions. Evaluates each member against an explicit economic objective:
   $$\text{Objective} = \text{Lost Production} + \text{Failure Repair} + \text{Downtime} + \text{Intervention} + \text{Deferred Maintenance} + \text{Terminal Risk Penalty}$$
 
 ### 3.3 Independent Safety Verifier (`packages/foresight/src/foresight/verification/verifier.py`)
-- **Independence Guarantee:** The verifier does not trust the proposer's simulation ensemble. In `independent_confirmation` ([verifier.py#L184-L216](file:///E:/Hackathons/foresight-ai/packages/foresight/src/foresight/verification/verifier.py#L184-L216)), it constructs a fresh 16-member simulation from the same state using seed offset `CONFIRMATION_BASE_SEED = 900`.
+- **Independence Guarantee:** The verifier does not trust the proposer's simulation ensemble. In `independent_confirmation` ([verifier.py#L184-L216](../packages/foresight/src/foresight/verification/verifier.py#L184-L216)), it constructs a fresh 16-member simulation from the same state using seed offset `CONFIRMATION_BASE_SEED = 900`.
 - **Enforced Safety Checks:**
   1. `action_parameters_valid`: Parameter ranges strictly bounded.
   2. `simulation_complete`: Full horizon simulated from fresh state.
@@ -200,14 +200,14 @@ sequenceDiagram
    - Python: Ruff check (`ruff check .`) ran across all 25+ modules and reported 0 issues.
    - Frontend: TypeScript compiler (`tsc --noEmit`) and ESLint (`eslint`) reported 0 errors.
 2. **Defensive Error Handling:**
-   - In `AgentOrchestrator.run()` ([orchestrator.py#L198-L211](file:///E:/Hackathons/foresight-ai/packages/foresight/src/foresight/agents/orchestrator.py#L198-L211)), execution is bounded by `asyncio.wait_for(timeout=300s)` and wraps all uncaught exceptions to record failure in the trace rather than crashing the FastAPI process.
+   - In `AgentOrchestrator.run()` ([orchestrator.py#L198-L211](../packages/foresight/src/foresight/agents/orchestrator.py#L198-L211)), execution is bounded by `asyncio.wait_for(timeout=300s)` and wraps all uncaught exceptions to record failure in the trace rather than crashing the FastAPI process.
 3. **Immutability and Separation of Observables:**
    - `MotorTwin.true_outputs()` clearly separates `SensorReading` (observable by ML/agent) from `GroundTruth` (hidden simulator state used only for evaluation scoring).
 
 ### 4.2 Technical Debt & Architectural Fragilities
-1. **Volatile In-Memory Session Storage ([sessions.py#L507-L552](file:///E:/Hackathons/foresight-ai/services/api/foresight_api/sessions.py#L507-L552)):**
+1. **Volatile In-Memory Session Storage ([sessions.py#L507-L552](../services/api/foresight_api/sessions.py#L507-L552)):**
    - Sessions exist exclusively in a Python dictionary `self.sessions: dict[str, LiveSession]`. Server restarts discard all active twins, history, and agent traces.
-2. **Race Window in Busy State Locking ([sessions.py#L332-L349](file:///E:/Hackathons/foresight-ai/services/api/foresight_api/sessions.py#L332-L349)):**
+2. **Race Window in Busy State Locking ([sessions.py#L332-L349](../services/api/foresight_api/sessions.py#L332-L349)):**
    - Session methods check `if self.busy:` and set `self.busy = "..."` without acquiring an `asyncio.Lock()`. Simultaneous async requests can pass the check before either sets the flag.
 3. **GIL Contention During Simulation:**
    - `compare_futures` runs in a thread pool via `asyncio.to_thread`. Because Python threads share the Global Interpreter Lock, running multiple 16-member or 32-member simulations concurrently will cause event-loop lag for HTTP requests.

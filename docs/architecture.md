@@ -12,7 +12,7 @@ It never connects to or controls real equipment. All telemetry comes from a dete
 
 ```mermaid
 flowchart TB
-    WEB["<b>Web · apps/web (Next.js)</b><br/>Mission Control · Futures Lab · Agent · Evidence · Diagnostics"]
+    WEB["Web · apps/web (Next.js)<br/>Mission Control · Futures Lab · Agent · Evidence · Diagnostics"]
 
     subgraph API["FastAPI · services/api"]
         direction LR
@@ -25,9 +25,9 @@ flowchart TB
     subgraph Core["foresight core · packages/foresight"]
         direction LR
         TW["MotorTwin<br/>physics ODEs, seeded"] --> TE["TelemetryStream"] --> RE["RiskEngine<br/>IsolationForest · CUSUM · XGBoost"]
-        OR["AgentOrchestrator<br/>bounded state machine"] -- "typed tools" --> FB["Future Branching<br/>N members × K actions"] --> VF{{"Safety Verifier<br/>deterministic, LLM-free"}}
+        OR["AgentOrchestrator<br/>bounded state machine"] -->|"typed tools"| FB["Future Branching<br/>N members × K actions"] --> VF{{"Safety Verifier<br/>deterministic, LLM-free"}}
         RE --> OR
-        OR -. "fallback" .-> PL["Deterministic planner"]
+        OR -.->|fallback| PL["Deterministic planner"]
     end
 
     subgraph LLM["Muse Spark · Responses API"]
@@ -36,13 +36,13 @@ flowchart TB
         FW["Fireworks AI<br/>muse-spark-open"]
     end
 
-    WEB <-->|"REST + SSE"| API
+    WEB <--->|"REST + SSE"| API
     SS --> TW
     RUN --> OR
     KEYS -.-> OR
-    OR <-->|"function tools + strict JSON"| LLM
-    VF -- "accepted" --> AP
-    AP -- "approved action" --> TW
+    OR <--->|"function tools + strict JSON"| LLM
+    VF -->|accepted| AP
+    AP -->|"approved action"| TW
 ```
 
 The browser never sees an API key. Every number the agent reasons about comes from a tool call into local code, and nothing reaches the twin without passing the verifier and an operator approval.
@@ -55,8 +55,8 @@ flowchart LR
     P --> D["Diagnose<br/>fault class + hypotheses"]
     D --> S["Simulate<br/>branch futures"]
     S --> V{"Verify<br/>blocking checks"}
-    V -- "rejected" --> D
-    V -- "accepted" --> R["Recommend<br/>operator approves"]
+    V -->|rejected| D
+    V -->|accepted| R["Recommend<br/>operator approves"]
     R --> M["Monitor<br/>post-intervention trajectory"]
     M --> O
 ```
@@ -70,16 +70,16 @@ sequenceDiagram
     participant UI as Web UI
     participant API as FastAPI
     participant AO as AgentOrchestrator
-    participant M as Muse Spark<br/>(Meta or Fireworks)
-    participant T as Local tools<br/>(frozen snapshot)
+    participant M as Muse Spark (Meta/Fireworks)
+    participant T as Local tools (snapshot)
     participant V as Verifier
 
     Op->>UI: Run diagnosis (provider, effort)
     UI->>API: POST /agent/runs
     API->>AO: start run on frozen snapshot
-    loop OBSERVE → ANALYZE → HYPOTHESIZE → INVESTIGATE
+    loop OBSERVE to ANALYZE to HYPOTHESIZE to INVESTIGATE
         AO->>M: context + function tools
-        M-->>AO: tool call (get_machine_state, get_sensor_history,<br/>analyze_anomalies, predict_failure_risk)
+        M-->>AO: tool call (get_machine_state, get_sensor_history, analyze_anomalies, predict_failure_risk)
         AO->>T: execute
         T-->>AO: real numbers + evidence ids
     end
@@ -94,7 +94,7 @@ sequenceDiagram
     AO-->>API: trace (provider, effort, tokens, cost)
     API-->>UI: SSE updates
     UI->>Op: verified recommendation
-    Op->>API: Approve → POST /interventions
+    Op->>API: Approve: POST /interventions
 ```
 
 If the model never submits a verified recommendation within the budget, or no key is configured, the deterministic planner picks the action and the trace says so.
@@ -103,17 +103,17 @@ If the model never submits a verified recommendation within the budget, or no ke
 
 ```mermaid
 flowchart TD
-    IN["Proposal<br/>action + claimed mode + cited evidence"] --> PV{"Valid and feasible?<br/>parameters in range; inspection inside<br/>horizon, before earliest simulated failure"}
-    PV -- no --> RJ["Rejected<br/>with reasons"]
-    PV -- yes --> LIM{"Simulated branch complete and<br/>within temperature, vibration,<br/>load and failure limits?"}
-    LIM -- no --> RJ
-    LIM -- yes --> IB{"Consequential action beats<br/>no-action on cost or failures?"}
-    IB -- no --> RJ
-    IB -- yes --> IC{"Independent re-simulation<br/>on fresh seeds confirms, and<br/>cited evidence ids exist?"}
-    IC -- no --> RJ
-    IC -- yes --> W{"Warnings?<br/>uncertainty, unsupported mode"}
-    W -- yes --> AW["Accepted with warnings"]
-    W -- no --> AC["Accepted"]
+    IN["Proposal<br/>action + claimed mode + cited evidence"] --> PV{"Valid and feasible?<br/>parameters in range, inspection inside<br/>horizon, before earliest simulated failure"}
+    PV -->|no| RJ["Rejected<br/>with reasons"]
+    PV -->|yes| LIM{"Simulated branch complete and<br/>within temperature, vibration,<br/>load and failure limits?"}
+    LIM -->|no| RJ
+    LIM -->|yes| IB{"Consequential action beats<br/>no-action on cost or failures?"}
+    IB -->|no| RJ
+    IB -->|yes| IC{"Independent re-simulation<br/>on fresh seeds confirms, and<br/>cited evidence ids exist?"}
+    IC -->|no| RJ
+    IC -->|yes| W{"Warnings?<br/>uncertainty, unsupported mode"}
+    W -->|yes| AW["Accepted with warnings"]
+    W -->|no| AC["Accepted"]
     AW --> HA["Human approval required<br/>for consequential actions"]
     AC --> HA
 ```
@@ -122,14 +122,14 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    ATK["Attacker model<br/>sees policy, checks, evidence ids"] -->|"6 proposals / round"| EXE["Agent tool path<br/>compare_futures → verify_intervention"]
+    ATK["Attacker model<br/>sees policy, checks, evidence ids"] -->|"6 proposals / round"| EXE["Agent tool path<br/>compare_futures to verify_intervention"]
     EXE --> VER{"Verifier"}
-    VER -- "blocked" --> FBK["Feedback"]
+    VER -->|blocked| FBK["Feedback"]
     FBK -->|"3 adaptive rounds"| ATK
-    VER -- "accepted" --> AUD["Audit<br/>48 members, fresh seeds"]
+    VER -->|accepted| AUD["Audit<br/>48 members, fresh seeds"]
     AUD --> OUT["hard escape · soft escape · accepted OK"]
     FUZ["Seeded random fuzzer<br/>(control, same budget)"] --> EXE
-    OUT -.->|"each hole → a SafetyPolicy flag"| VER
+    OUT -.->|"each hole maps to SafetyPolicy flag"| VER
 ```
 
 ## Layers

@@ -33,18 +33,18 @@ flowchart LR
     subgraph Core["foresight core"]
         TW["Digital twin<br/>15 kW motor"] --> RK["Risk models<br/>IF · CUSUM · XGBoost"]
         RK --> AG["Bounded agent"]
-        AG -- "typed tools" --> FB["Future Branching"]
+        AG -->|"typed tools"| FB["Future Branching"]
         FB --> VF{{"Safety verifier"}}
-        AG -. fallback .-> PL["Deterministic planner"]
+        AG -.->|fallback| PL["Deterministic planner"]
     end
     LLM["Muse Spark<br/>Meta API · Fireworks"]
 
-    UI <-->|"REST + SSE"| S
+    UI <--->|"REST + SSE"| S
     S --> TW
     K -.-> AG
-    AG <--> LLM
-    VF -- "accepted" --> HA["Operator approval"]
-    HA -- "intervention" --> TW
+    AG <---> LLM
+    VF -->|accepted| HA["Operator approval"]
+    HA -->|"intervention"| TW
 ```
 
 The model only reasons over numbers returned by local tools, and every proposal must pass the deterministic verifier and an operator approval before it touches the (simulated) motor. More diagrams, including one agent run, the verifier decision tree and the red-team loop, are in [`docs/architecture.md`](docs/architecture.md).
@@ -153,15 +153,15 @@ From the last committed report (synthetic held-out seeds; see the report for ful
 
 - Calibrated XGBoost 15-min failure risk: high PR-AUC with low FPR vs alarm/z-score baselines  
 - Closed-loop policies: every intervening policy had 0 failures against 10/20 with no action on the main 5 seeds. Foresight never touched a healthy episode.  
-- Closed loop (seeds 2000–2004): `foresight_active` mean cost $1,647 vs `foresight_estimated` $1,765 vs the inspect-on-alarm rule $1,473 vs no-action $16,835. The same ranking holds on confirmation (2005–2014) and on a 5-seed hold-out that was never inspected (2015–2019). The inspect-on-alarm rule is still cheaper; Future Branching beats an ML-only inspect trigger; the information gate modestly lowers cost vs estimated without adding a failure. One remaining miss: a 10-minute inspection scheduled 5 minutes before episode end never finishes, so the terminal-risk penalty still applies.
-- **Provider comparison** (126 live runs; Meta Muse Spark 1.3 vs Fireworks Muse Spark Open at low, medium and high effort; 7 cases × 3 repeats; verifier v2; $5.65). Regret is the agent's chosen action against the deterministic planner's, scored in one shared audit ensemble:
-  - Meta's mean regret was +$3, −$4 and −$21 at low, medium and high. At high effort the 95% CI was [−$50, $0], and no run was worse than the planner.
-  - Fireworks' mean regret was +$328, +$131 and +$121: it picks costlier actions.
+- Closed loop (seeds 2000–2004): `foresight_active` mean cost \\$1,647 vs `foresight_estimated` \\$1,765 vs the inspect-on-alarm rule \\$1,473 vs no-action \\$16,835. The same ranking holds on confirmation (2005–2014) and on a 5-seed hold-out that was never inspected (2015–2019). The inspect-on-alarm rule is still cheaper; Future Branching beats an ML-only inspect trigger; the information gate modestly lowers cost vs estimated without adding a failure. One remaining miss: a 10-minute inspection scheduled 5 minutes before episode end never finishes, so the terminal-risk penalty still applies.
+- **Provider comparison** (126 live runs; Meta Muse Spark 1.3 vs Fireworks Muse Spark Open at low, medium and high effort; 7 cases × 3 repeats; verifier v2; \\$5.65). Regret is the agent's chosen action against the deterministic planner's, scored in one shared audit ensemble:
+  - Meta's mean regret was +\\$3, −\\$4 and −\\$21 at low, medium and high. At high effort the 95% CI was [−\\$50, \\$0], and no run was worse than the planner.
+  - Fireworks' mean regret was +\\$328, +\\$131 and +\\$121: it picks costlier actions.
   - In 4–6 of 21 runs per arm, Meta ended without a verified submission and the optimizer chose instead. Fireworks never needed that fallback, but 3 of its 63 runs hit the 300-second agent time limit.
   - Across all arms: 0 unsafe picks, 0 interventions on the healthy case, 0 invented evidence ids.
-- **Re-check on verifier v3** (28 runs, both providers at high effort, $1.64): 28/28 completed, 0 unsafe picks, 0 healthy false alarms. Mean regret was +$0.70 for Meta and +$46 for Fireworks; both CIs include 0.
-- **Re-check on verifier v4 + information gate** (28 runs, both providers at high effort, $1.71): 28/28 completed, 0 unsafe picks, 0 healthy false alarms, 0 verifier rejections. Mean regret was +$118 for Meta and +$173 for Fireworks; both CIs still include 0 (wide because of two $2,000 shutdowns). Three runs were worse than the planner and all three were safe: Fireworks shut down a cooling case, Meta shut down an overload case, and Fireworks derated an overload by 40%. One Meta run fell back to the optimizer. The information gate did not hold any of these snapshots — the live cases have supported trends (`t` ≫ 2); the gate is for post-restart spurious slopes. Fireworks invented 44 unknown evidence ids in hypotheses on 2 of 14 runs (v3 had 0); the final submissions still verified.
-- **Verifier red-team.** Fireworks and Meta acted as white-box attackers: 3 adaptive rounds over 7 cases, with a random fuzzer as control. About $6.60 across four verifier versions.
+- **Re-check on verifier v3** (28 runs, both providers at high effort, \\$1.64): 28/28 completed, 0 unsafe picks, 0 healthy false alarms. Mean regret was +\\$0.70 for Meta and +\\$46 for Fireworks; both CIs include 0.
+- **Re-check on verifier v4 + information gate** (28 runs, both providers at high effort, \\$1.71): 28/28 completed, 0 unsafe picks, 0 healthy false alarms, 0 verifier rejections. Mean regret was +\\$118 for Meta and +\\$173 for Fireworks; both CIs still include 0 (wide because of two \\$2,000 shutdowns). Three runs were worse than the planner and all three were safe: Fireworks shut down a cooling case, Meta shut down an overload case, and Fireworks derated an overload by 40%. One Meta run fell back to the optimizer. The information gate did not hold any of these snapshots — the live cases have supported trends (`t` ≫ 2); the gate is for post-restart spurious slopes. Fireworks invented 44 unknown evidence ids in hypotheses on 2 of 14 runs (v3 had 0); the final submissions still verified.
+- **Verifier red-team.** Fireworks and Meta acted as white-box attackers: 3 adaptive rounds over 7 cases, with a random fuzzer as control. About \\$6.60 across four verifier versions.
 
   | Verifier | Attempts | Hard escapes | "Worse than nothing" / healthy escapes |
   |---|---|---|---|

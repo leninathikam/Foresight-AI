@@ -6,23 +6,23 @@ This is a **physics-inspired teaching / research simulator**, not a certified in
 
 Single lumped winding node:
 
-\[
+$$
 C \frac{dT}{dt} = P_\text{loss}(T) - G(\eta, \omega)\,(T - T_\text{amb})
-\]
+$$
 
 With losses held constant over a 5 s step, the ODE is linear and integrated exactly:
 
-\[
+$$
 T(t+\Delta t) = T_{ss} + (T - T_{ss})\,e^{-G\Delta t / C}
-\]
+$$
 
-Losses include copper (\(I^2\) with temperature coefficient), iron (\(\propto \omega^{1.6}\)), and friction (\(\propto \omega \cdot (1 + 3d)\) where \(d\) is bearing damage).
+Losses include copper ($I^2$ with temperature coefficient), iron ($\propto \omega^{1.6}$), and friction ($\propto \omega \cdot (1 + 3d)$ where $d$ is bearing damage).
 
-Cooling conductance \(G\) scales with shaft-fan airflow (speed) and auxiliary boost. Slowing a self-ventilated motor at constant torque **reduces** cooling — deliberate and physically standard.
+Cooling conductance $G$ scales with shaft-fan airflow (speed) and auxiliary boost. Slowing a self-ventilated motor at constant torque **reduces** cooling — deliberate and physically standard.
 
 ## Bearing damage
 
-Damage \(d = 1 - \text{health}\) grows exponentially once a defect is active, with cubic load dependence inspired by classical L10 life models. Vibration RMS combines a speed/load baseline with a defect term.
+Damage $d = 1 - \text{health}$ grows exponentially once a defect is active, with cubic load dependence inspired by classical L10 life models. Vibration RMS combines a speed/load baseline with a defect term.
 
 ## Scenarios
 
