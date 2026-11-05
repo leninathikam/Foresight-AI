@@ -125,6 +125,6 @@ flowchart LR
 | :--- | :--- | :--- | :--- |
 | **Milestone 1** | T + 6 Hours | Implement Verifier v5 ($N=32$ confirmation) + LRU session eviction | Senior Engineer |
 | **Milestone 2** | T + 18 Hours | Run CWRU Bearing Data benchmark & add results to `docs/` | AI/ML Engineer |
-| **Milestone 3** | T + 30 Hours | Record 3-minute video adhering to `docs/demo-script.md` | Product Architect |
+| **Milestone 3** | T + 30 Hours | Record 3-minute video adhering to `3-minute demo path` | Product Architect |
 | **Milestone 4** | T + 48 Hours | Deploy demo to cloud VM (e.g. AWS/Fly.io) with Bearer token protection | DevOps Engineer |
 | **Milestone 5** | November 4, 12:00 PM | Final Cerebral Valley submission submission review & freeze | All |

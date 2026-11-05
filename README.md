@@ -154,7 +154,6 @@ Requires Docker. Primary path for judges remains `uv` + `npm` if containers are 
 5. Approve verified recommendation → observe post-intervention trajectory  
 6. Evidence → real metrics; Diagnostics → API key / model check  
 
-Script: [`docs/demo-script.md`](docs/demo-script.md)
 
 ## Repository layout
 
@@ -165,7 +164,7 @@ packages/foresight/       Twin, ML, branching, verifier, agent
 scripts/                  Train, evaluate, smoke
 tests/                    Unit + API integration
 artifacts/reports/        Evaluation outputs (committed)
-docs/                     Architecture, demo, submission
+docs/                     Architecture, simulation, risks
 ```
 
 ## Model providers
@@ -215,10 +214,7 @@ Do not treat simulator metrics as real-plant performance.
 
 - [Architecture](docs/architecture.md)
 - [Simulation model](docs/simulation-model.md)
-- [Demo script](docs/demo-script.md)
-- [Submission draft](docs/submission.md)
-- [Progress checklist](docs/progress.md)
-- [Risks](docs/risks.md)
+- [Risks and Limitations](docs/risks.md)
 
 ## License
 

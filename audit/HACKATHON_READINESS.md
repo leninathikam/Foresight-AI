@@ -19,7 +19,7 @@ Based on the official judging criteria for the Meta Global AI Developer Hackatho
 | **Meta Model & Sponsor Integration** | 25% | **9.8 / 10** | Unmatched integration of Meta's Muse Spark family. Seamlessly supports Meta Muse Spark 1.3 (Meta Model API) and Muse Spark Open on Fireworks AI via the Responses API. Rigorous head-to-head empirical regret benchmark across 126 runs. |
 | **Originality & Innovation** | 20% | **9.4 / 10** | Replaces hallucinating generative "advisors" with deterministic future branching. Implements active information gathering ($t < 2.0$ trend testing). Bounded tool machine prevents inventing sensor numbers. |
 | **Real-World Impact & Problem Importance** | 15% | **8.8 / 10** | Industrial motor failure causes catastrophic unplanned factory downtime. Foresight AI provides counterfactual economic evaluation before action. Weakness: Tested purely on synthetic data without physical motor validation. |
-| **Demo Quality & Presentation** | 10% | **9.2 / 10** | Distinctive industrial aesthetic. Crisp 3-minute scripted presentation (`docs/demo-script.md`). Real-time SSE streaming. Deterministic fallback guarantees demo will not crash if API keys fail. |
+| **Demo Quality & Presentation** | 10% | **9.2 / 10** | Distinctive industrial aesthetic. Crisp 3-minute scripted presentation (`3-minute demo path`). Real-time SSE streaming. Deterministic fallback guarantees demo will not crash if API keys fail. |
 | **Weighted Total** | **100%** | **9.45 / 10** | **Top-Tier Contender for Category Grand Prize & Bonus Tracks** |
 
 ---
@@ -74,7 +74,7 @@ Based on the official judging criteria for the Meta Global AI Developer Hackatho
 
 ## 5. Ideal 3-Minute Live Demonstration Path
 
-Follow [`docs/demo-script.md`](../docs/demo-script.md) verbatim:
+Follow [`3-minute demo path`](../3-minute demo path) verbatim:
 
 1. **Minute 0:00–0:45 (The Problem & Twin):**
    - Open Mission Control. Start `Cooling degradation`, Seed `7`.
