@@ -69,6 +69,7 @@ TOOL_STAGE = {
     "compare_futures": AgentStage.SIMULATE,
     "assess_information_value": AgentStage.VERIFY,
     "verify_intervention": AgentStage.VERIFY,
+    "generate_decision_receipt": AgentStage.VERIFY,
     "submit_recommendation": AgentStage.VERIFY,
 }
 
@@ -98,6 +99,42 @@ DETERMINISTIC_CANDIDATES: dict[str, list[Action]] = {
         ReduceLoad(fraction=0.3),
         ScheduleInspection(delay_minutes=10),
         ScheduleInspection(delay_minutes=0),
+        ControlledShutdown(),
+    ],
+    "none": [],
+}
+
+DETERMINISTIC_CANDIDATES_EXPANDED: dict[str, list[Action]] = {
+    "cooling": [
+        IncreaseCooling(boost=0.4),
+        ReduceLoad(fraction=0.3),
+        ScheduleInspection(delay_minutes=0),
+        ScheduleInspection(delay_minutes=10),
+        ScheduleInspection(delay_minutes=15),
+        ScheduleInspection(delay_minutes=20),
+        ScheduleInspection(delay_minutes=25),
+        ScheduleInspection(delay_minutes=30),
+        ControlledShutdown(),
+    ],
+    "bearing": [
+        ReduceLoad(fraction=0.3),
+        ReduceSpeed(fraction=0.3),
+        ScheduleInspection(delay_minutes=0),
+        ScheduleInspection(delay_minutes=10),
+        ScheduleInspection(delay_minutes=15),
+        ScheduleInspection(delay_minutes=20),
+        ScheduleInspection(delay_minutes=25),
+        ScheduleInspection(delay_minutes=30),
+        ControlledShutdown(),
+    ],
+    "overload": [
+        ReduceLoad(fraction=0.3),
+        ScheduleInspection(delay_minutes=0),
+        ScheduleInspection(delay_minutes=10),
+        ScheduleInspection(delay_minutes=15),
+        ScheduleInspection(delay_minutes=20),
+        ScheduleInspection(delay_minutes=25),
+        ScheduleInspection(delay_minutes=30),
         ControlledShutdown(),
     ],
     "none": [],
@@ -617,7 +654,12 @@ class AgentOrchestrator:
         risk60 = next(
             (h.probability for h in self.snapshot.assessment.horizons if h.horizon_min == 60), 0.0
         )
-        candidates = list(DETERMINISTIC_CANDIDATES.get(top, []))
+        candidates_map = (
+            DETERMINISTIC_CANDIDATES_EXPANDED
+            if getattr(self.settings, "expanded_candidate_grid", False)
+            else DETERMINISTIC_CANDIDATES
+        )
+        candidates = list(candidates_map.get(top, []))
         if not candidates and risk60 > LOW_RISK:
             candidates = [
                 ReduceLoad(fraction=0.3),
@@ -633,7 +675,25 @@ class AgentOrchestrator:
         comp: FutureComparison = self.tools.comparisons[result["comparison_id"]]
         self._transition(AgentStage.VERIFY)
         mode = DIAGNOSIS_TO_MODE.get(top, "unknown")
-        order = list(comp.ranking)
+        last_vals = self.snapshot.samples[-1].values if self.snapshot.samples else {}
+        t_val = last_vals.get("temperature_c")
+        v_val = last_vals.get("vibration_mm_s")
+        is_alarm = (t_val is not None and t_val >= 130.0) or (
+            v_val is not None and v_val >= 4.5
+        )
+        use_alarm_priority = is_alarm and getattr(self.settings, "alarm_prioritized_dispatch", True)
+        if use_alarm_priority:
+            # Under active alarm conditions, prioritize immediate maintenance (delay=0) over delayed actions
+            def alarm_priority_key(bid: str) -> tuple[int, float]:
+                b = next(br for br in comp.branches if br.branch_id == bid)
+                act = b.action
+                if act.get("type") == "schedule_inspection" and act.get("delay_minutes", 0) > 0:
+                    return (1, b.objective)
+                return (0, b.objective)
+
+            order = sorted(comp.ranking, key=alarm_priority_key)
+        else:
+            order = list(comp.ranking)
         for branch_id in order:
             branch = next(b for b in comp.branches if b.branch_id == branch_id)
             action = ACTION_ADAPTER.validate_python(branch.action)

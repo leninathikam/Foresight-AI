@@ -28,6 +28,10 @@ from foresight.agents import (
     calculate_actual_cost,
     estimate_call_cost,
 )
+from foresight.agents.multimodal import (
+    PRELOADED_INSPECTION_GALLERY,
+    analyze_multimodal_evidence,
+)
 from foresight.artifacts import MODEL_PATH, REPORTS_DIR, load_or_train_bundle
 from foresight.branching import ACTION_ADAPTER, OBJECTIVE_DEFINITION
 from foresight.config import PROVIDERS, ProviderConfig, ProviderName, Settings, get_settings
@@ -35,6 +39,11 @@ from foresight.prediction import FEATURE_NAMES
 from foresight.prediction.features import FEATURE_DESCRIPTIONS
 from foresight.simulation import DEFAULT_ECONOMICS, DEFAULT_MOTOR, SCENARIOS, ScenarioId
 from foresight.verification import DEFAULT_POLICY
+from foresight.verification.challenge import (
+    SAFETY_CHALLENGES,
+    list_safety_challenges,
+)
+from foresight.verification.receipt import verify_receipt_integrity
 from foresight_api.logging_setup import configure_logging
 from foresight_api.rate_limiter import RateLimitMiddleware, SlidingWindowRateLimiter
 from foresight_api.sessions import LiveSession, SessionError, SessionManager, parse_action
@@ -518,3 +527,145 @@ async def replay_check(request: Request, session_id: str):
 @app.get("/api/actions/schema")
 async def action_schema():
     return ACTION_ADAPTER.json_schema()
+
+
+# ---------------------------------------------------------------------- Future Arena
+
+
+class ArenaBody(BaseModel):
+    horizon_min: float = Field(180.0, ge=30, le=360)
+    members: int = Field(8, ge=4, le=32)
+    reduce_load_fraction: float = Field(0.30, ge=0.05, le=0.50)
+    inspection_delay_min: float = Field(15.0, ge=0.0, le=240.0)
+
+
+@app.post("/api/sessions/{session_id}/arena")
+async def run_arena_endpoint(request: Request, session_id: str, body: ArenaBody | None = None):
+    body = body or ArenaBody()
+    session = _session(request, session_id)
+    arena = await session.run_arena(
+        horizon_min=body.horizon_min,
+        members=body.members,
+        reduce_load_fraction=body.reduce_load_fraction,
+        inspection_delay_min=body.inspection_delay_min,
+    )
+    return arena.model_dump()
+
+
+# ---------------------------------------------------------------------- Safety Challenge
+
+
+@app.get("/api/safety-challenge/catalog")
+async def safety_challenge_catalog():
+    return [c.model_dump() for c in list_safety_challenges()]
+
+
+class SafetyChallengeBody(BaseModel):
+    challenge_id: str
+
+
+@app.post("/api/sessions/{session_id}/safety-challenge")
+async def run_safety_challenge_endpoint(
+    request: Request, session_id: str, body: SafetyChallengeBody
+):
+    session = _session(request, session_id)
+    try:
+        res = await session.run_safety_challenge(body.challenge_id)
+        return res.model_dump()
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+# ---------------------------------------------------------------------- Decision Receipts
+
+
+class ReceiptBody(BaseModel):
+    action: dict | None = None
+    claimed_fault_mode: str = "unknown"
+    cited_evidence_ids: list[str] = Field(default_factory=list)
+    human_approved: bool = False
+    operator_id: str | None = None
+
+
+@app.post("/api/sessions/{session_id}/receipt")
+async def generate_receipt_endpoint(request: Request, session_id: str, body: ReceiptBody | None = None):
+    body = body or ReceiptBody()
+    session = _session(request, session_id)
+    target_action = _action(body.action) if body.action else None
+    receipt = await session.generate_receipt(
+        action=target_action,
+        claimed_fault_mode=body.claimed_fault_mode,
+        cited_evidence_ids=body.cited_evidence_ids,
+        human_approved=body.human_approved,
+        operator_id=body.operator_id,
+    )
+    return receipt.model_dump()
+
+
+class VerifyReceiptBody(BaseModel):
+    receipt: dict[str, Any]
+
+
+@app.post("/api/receipt/verify")
+async def verify_receipt_endpoint(body: VerifyReceiptBody):
+    valid, computed_digest, message = verify_receipt_integrity(body.receipt)
+    return {
+        "valid": valid,
+        "recorded_digest": body.receipt.get("sha256_digest", ""),
+        "computed_digest": computed_digest,
+        "message": message,
+    }
+
+
+# ---------------------------------------------------------------------- Multimodal Evidence
+
+
+@app.get("/api/evidence/multimodal/gallery")
+async def multimodal_gallery():
+    return [asset.model_dump() for asset in PRELOADED_INSPECTION_GALLERY]
+
+
+class MultimodalAnalyzeBody(BaseModel):
+    asset_id: str | None = None
+    image_base64: str | None = None
+    mime_type: str = "image/jpeg"
+    component: str = "motor"
+
+
+@app.post("/api/evidence/multimodal/analyze")
+async def analyze_multimodal_endpoint(request: Request, body: MultimodalAnalyzeBody):
+    settings: Settings = request.app.state.settings
+    component = body.component
+
+    # If preloaded asset selected, use synthetic representative image data
+    if body.asset_id:
+        asset = next((a for a in PRELOADED_INSPECTION_GALLERY if a.asset_id == body.asset_id), None)
+        if not asset:
+            raise HTTPException(404, f"Preloaded asset {body.asset_id} not found")
+        component = asset.component
+        # Standard placeholder JPEG bytes with valid magic header
+        image_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF" + f"FORESIGHT_SIMULATED_INSPECTION_{body.asset_id}".encode("utf-8")
+        mime = "image/jpeg"
+    elif body.image_base64:
+        import base64
+
+        try:
+            image_bytes = base64.b64decode(body.image_base64)
+            mime = body.mime_type
+        except Exception as exc:
+            raise HTTPException(400, f"Invalid base64 encoding: {exc}") from exc
+    else:
+        raise HTTPException(400, "Provide either asset_id or image_base64")
+
+    try:
+        analysis = await analyze_multimodal_evidence(
+            image_bytes=image_bytes,
+            mime_type=mime,
+            component=component,
+            asset_id=body.asset_id,
+            settings=settings,
+        )
+        return analysis.model_dump()
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+

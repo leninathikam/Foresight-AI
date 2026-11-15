@@ -264,6 +264,7 @@ export interface VerificationResult {
   comparison_id: string | null;
   summary: string;
   verification_id?: string;
+  decision_hash?: string;
 }
 
 // ---------------------------------------------------------------- agent
@@ -395,7 +396,7 @@ export interface Health {
   providers: { name: ProviderName; label: string; model: string; default: boolean }[];
 }
 
-export type ProviderName = "meta" | "fireworks";
+export type ProviderName = "gemini" | "meta" | "fireworks";
 
 export interface ProviderInfo {
   name: ProviderName;
@@ -447,5 +448,161 @@ export interface BudgetSummary {
   session_remaining_usd: number | null;
   active_reservations_count: number;
   spending_ceiling_guaranteed: boolean;
+  disclaimer: string;
+}
+
+export interface ArenaScenarioResult {
+  scenario_id: string;
+  label: string;
+  action: Action;
+  failure_incidence: number;
+  failure_incidence_ci95: [number, number];
+  peak_temperature_p90_c: number;
+  peak_vibration_p90_mm_s: number;
+  expected_cost_usd: number;
+  cost_breakdown: Record<string, number>;
+  downtime_mean_h: number;
+  objective_score: number;
+  temperature_band: { t_min: number[]; p10: number[]; p50: number[]; p90: number[] };
+  vibration_band: { t_min: number[]; p10: number[]; p50: number[]; p90: number[] };
+  safety_status: "accepted" | "accepted_with_warnings" | "rejected";
+  safety_summary: string;
+  rejection_reasons: string[];
+  decision_hash: string;
+  is_best_objective: boolean;
+  evidence_id: string;
+}
+
+export interface FutureArenaComparison {
+  arena_id: string;
+  session_id: string;
+  timestamp_utc: string;
+  t0_min: number;
+  horizon_min: number;
+  members: number;
+  reproducible_base_seed: number;
+  seeds: number[];
+  scenarios: ArenaScenarioResult[];
+  winner_scenario_id: string;
+  winner_label: string;
+  recommendation_reason: string;
+  comparison_id: string;
+  compute_ms: number;
+  assumptions: string[];
+  provenance_note: string;
+}
+
+export interface SafetyChallengeDefinition {
+  challenge_id: string;
+  name: string;
+  category: "physical_envelope" | "feasibility_lead_time" | "hallucination_provenance";
+  description: string;
+  attack_hypothesis: string;
+  unsafe_action: Action;
+  claimed_failure_mode: string;
+  cited_evidence_ids: string[];
+  expected_violated_check: string;
+  expected_limit_description: string;
+}
+
+export interface SafetyChallengeExecutionResult {
+  challenge_id: string;
+  name: string;
+  timestamp_utc: string;
+  session_id: string;
+  submitted_action: Action;
+  action_label: string;
+  verdict: "rejected" | "accepted" | "accepted_with_warnings";
+  rejection_reasons: string[];
+  primary_violated_check: string;
+  violated_check_detail: string;
+  measured_value: number | string | null;
+  safety_limit: number | string | null;
+  direct_actuation_blocked: boolean;
+  actuation_barrier_message: string;
+  all_checks: CheckResult[];
+  decision_hash: string;
+  compute_ms: number;
+}
+
+export interface DecisionReceipt {
+  receipt_id: string;
+  schema_version: string;
+  generated_at: string;
+  session_id: string;
+  asset_id: string;
+  asset_specs: Record<string, unknown>;
+  input_provenance: {
+    telemetry_samples_count: number;
+    t_current_s: number;
+    telemetry_window_sha256: string;
+    latest_sensor_values: Record<string, number | null>;
+    anomaly_score: number | null;
+    is_anomalous: boolean;
+  };
+  model_provenance: {
+    copilot_provider: string;
+    copilot_model: string;
+    risk_engine: string;
+    anomaly_engine: string;
+    changepoint_detector: string;
+    safety_verifier_version: string;
+  };
+  scenarios_evaluated: {
+    branch_id: string;
+    label: string;
+    action: Action;
+    failure_incidence: number;
+    failure_incidence_ci95: [number, number];
+    peak_temperature_p90_c: number;
+    peak_vibration_p90_mm_s: number;
+    expected_cost_usd: number;
+    objective_score: number;
+    simulated_evidence_id: string;
+  }[];
+  recommended_action: Action;
+  claimed_fault_mode: string;
+  cited_evidence_ids: string[];
+  safety_verification: {
+    verdict: string;
+    decision_hash: string;
+    action_label: string;
+    summary: string;
+    requires_human_approval: boolean;
+    rejection_reasons: string[];
+    checks: CheckResult[];
+  };
+  human_approval: {
+    required: boolean;
+    status: "approved" | "pending_human_approval" | "rejected";
+    operator_id: string | null;
+    approved_at: string | null;
+  };
+  sha256_digest: string;
+  audit_disclaimer: string;
+}
+
+export interface PreloadedAsset {
+  asset_id: string;
+  name: string;
+  component: string;
+  description: string;
+  simulated_fault: string;
+  sample_measurements: Record<string, unknown>;
+}
+
+export interface MultimodalAnalysisResult {
+  analysis_id: string;
+  asset_component: string;
+  source_type: "google_gemini_vision" | "heuristic_multimodal_analyzer";
+  model_name: string | null;
+  timestamp_utc: string;
+  image_sha256: string;
+  extracted_evidence: string[];
+  model_interpretation: string[];
+  unverified_assumptions: string[];
+  suggested_evidence_id: string;
+  recommended_fault_mode: "thermal" | "bearing" | "overload" | "none";
+  latency_ms: number;
   disclaimer: string;
 }

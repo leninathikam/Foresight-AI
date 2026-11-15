@@ -7,6 +7,7 @@ import { DIAGNOSIS_LABEL, num, pct, simClock } from "@/lib/format";
 import { useSession } from "@/lib/session-context";
 import type { CompactSample, RiskAssessment, ScenarioId, ScenarioInfo } from "@/lib/types";
 import { RiskChart, TelemetryChart } from "./charts";
+import { IconArena, IconCopilot, IconReceipt, IconShield, IconZap } from "./icons";
 import {
   Badge,
   Button,
@@ -425,8 +426,14 @@ export function MissionControl() {
             >
               {pending === "inject" && <Spinner />} Inject fault
             </Button>
-            <Button variant="primary" onClick={() => router.push("/agent")}>
-              Analyze with agent
+            <Button variant="primary" onClick={() => router.push("/arena")}>
+              Future Arena
+            </Button>
+            <Button variant="danger" onClick={() => router.push("/safety-challenge")}>
+              Safety Challenge
+            </Button>
+            <Button onClick={() => router.push("/agent")}>
+              Gemini Copilot
             </Button>
             <span className="mx-1 h-5 w-px bg-slate-800" />
             <Button variant="ghost" onClick={() => void endSession()}>
@@ -437,6 +444,71 @@ export function MissionControl() {
       />
       {s.paused && s.pause_reason && <Notice tone="amber">Simulation paused: {s.pause_reason}</Notice>}
       {error && <Notice tone="rose">{error}</Notice>}
+
+      {/* Berkeley x DeepMind Hackathon Judge Quick Start */}
+      <div className="rounded-lg border border-cyan-500/30 bg-gradient-to-r from-slate-900 via-cyan-950/20 to-slate-900 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-2.5">
+          <div className="flex items-center gap-2">
+            <div className="flex h-5 w-5 items-center justify-center rounded bg-cyan-500/10 text-cyan-400">
+              <IconZap className="h-3.5 w-3.5" />
+            </div>
+            <span className="font-mono text-xs uppercase tracking-wider text-cyan-300 font-semibold">
+              Berkeley x DeepMind Hackathon · 15-Second Showcase Flow
+            </span>
+          </div>
+          <span className="font-mono text-[11px] text-slate-400">Zero Technical Narration Required</span>
+        </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <button
+            onClick={() => router.push("/arena")}
+            className="flex items-center gap-3 rounded border border-slate-700/60 bg-slate-800/60 p-2.5 text-left transition hover:border-cyan-400 hover:bg-slate-800"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-cyan-500/20 bg-cyan-500/10 text-cyan-400">
+              <IconArena className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-100">Step 1: Future Arena</div>
+              <div className="text-[11px] text-slate-400">Compare 3 paths side-by-side</div>
+            </div>
+          </button>
+          <button
+            onClick={() => router.push("/agent")}
+            className="flex items-center gap-3 rounded border border-slate-700/60 bg-slate-800/60 p-2.5 text-left transition hover:border-cyan-400 hover:bg-slate-800"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-cyan-500/20 bg-cyan-500/10 text-cyan-400">
+              <IconCopilot className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-100">Step 2: Gemini Copilot</div>
+              <div className="text-[11px] text-slate-400">Watch typed function calls & cost</div>
+            </div>
+          </button>
+          <button
+            onClick={() => router.push("/safety-challenge")}
+            className="flex items-center gap-3 rounded border border-slate-700/60 bg-slate-800/60 p-2.5 text-left transition hover:border-rose-400 hover:bg-slate-800"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-rose-500/20 bg-rose-500/10 text-rose-400">
+              <IconShield className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-rose-300">Step 3: Safety Challenge</div>
+              <div className="text-[11px] text-slate-400">Adversarial attack & barrier</div>
+            </div>
+          </button>
+          <button
+            onClick={() => router.push("/receipts")}
+            className="flex items-center gap-3 rounded border border-slate-700/60 bg-slate-800/60 p-2.5 text-left transition hover:border-emerald-400 hover:bg-slate-800"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-emerald-500/20 bg-emerald-500/10 text-emerald-400">
+              <IconReceipt className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-emerald-300">Step 4: Decision Receipts</div>
+              <div className="text-[11px] text-slate-400">SHA-256 tamper-evident proof</div>
+            </div>
+          </button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-slate-800 bg-slate-800 lg:grid-cols-5">
         <Stat label="Winding temp" value={num(T, 1)} unit="°C" provenance="observed" tone={T !== null && T >= 130 ? (T >= 145 ? "bad" : "warn") : undefined} hint="alarm 130 · limit 155" />

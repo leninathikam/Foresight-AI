@@ -102,10 +102,30 @@ def parse_response(payload: dict, latency_ms: float) -> LLMResponse:
     )
 
 
-_KEY_ENV = {"meta": "MODEL_API_KEY", "fireworks": "FIREWORKS_API_KEY"}
+_KEY_ENV = {"meta": "MODEL_API_KEY", "fireworks": "FIREWORKS_API_KEY", "gemini": "GEMINI_API_KEY"}
 
 
 class ModelClient:
+    def __new__(
+        cls,
+        settings: Settings | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+        *,
+        provider: ProviderName | None = None,
+        reasoning_effort: str | None = None,
+        **kwargs: Any,
+    ):
+        if settings is None:
+            return super().__new__(cls)
+        config = settings.provider(provider)
+        if config.name.startswith("gemini") and cls is ModelClient:
+            from foresight.agents.gemini import GeminiModelClient
+
+            return GeminiModelClient(
+                settings, provider=provider, reasoning_effort=reasoning_effort
+            )
+        return super().__new__(cls)
+
     def __init__(
         self,
         settings: Settings,
@@ -235,7 +255,21 @@ class ModelClient:
         raise last_error
 
 
-MetaModelClient = ModelClient
+class MetaModelClient(ModelClient):
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.AsyncBaseTransport | None = None,
+        *,
+        provider: ProviderName | None = "meta",
+        reasoning_effort: str | None = None,
+    ) -> None:
+        super().__init__(
+            settings,
+            transport=transport,
+            provider=provider or "meta",
+            reasoning_effort=reasoning_effort,
+        )
 
 
 def _error_message(resp: httpx.Response) -> str:

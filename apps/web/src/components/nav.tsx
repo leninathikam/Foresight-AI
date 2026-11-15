@@ -11,9 +11,11 @@ import { StatusDot, cx } from "./ui";
 
 const LINKS = [
   { href: "/", label: "Mission Control" },
-  { href: "/futures", label: "Future Branching" },
-  { href: "/agent", label: "Agent" },
-  { href: "/evidence", label: "Evidence" },
+  { href: "/arena", label: "Future Arena" },
+  { href: "/safety-challenge", label: "Safety Challenge" },
+  { href: "/agent", label: "Gemini Copilot" },
+  { href: "/receipts", label: "Decision Receipts" },
+  { href: "/evidence", label: "Multimodal Evidence" },
   { href: "/diagnostics", label: "Diagnostics" },
 ];
 

@@ -86,7 +86,11 @@ def test_ml_only_baseline_inspects_on_risk_without_simulation(small_bundle):
 
 
 def test_live_agent_eval_is_not_faked_without_key(small_bundle):
-    out = live_agent_metrics(small_bundle, Settings(MODEL_API_KEY=None), run=True)
+    out = live_agent_metrics(
+        small_bundle,
+        Settings(MODEL_API_KEY=None, GEMINI_API_KEY=None, GOOGLE_API_KEY=None),
+        run=True,
+    )
     assert out["status"] == "not_run"
 
 

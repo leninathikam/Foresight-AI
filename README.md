@@ -2,22 +2,62 @@
 
 **See the failure before it happens. Simulate the future. Prevent the outcome.**
 
+> **Berkeley x DeepMind Hackathon — Online Track Submission**  
+> **Dedicated Feature Branch:** `feat/berkeley-hackathon-gemini-arena`  
+> **Official SDK Integration:** `google-genai==3.3.0` (`gemini-3.8-flash`)  
+> **Submission Documentation:**
+> - [Team One-Pager](docs/submission/TEAM_ONE_PAGER.md)
+> - [Idea & Prototype One-Pager](docs/submission/IDEA_AND_PROTOTYPE_ONE_PAGER.md)
+> - [Two-Minute Pitch Script](docs/submission/TWO_MINUTE_PITCH_SCRIPT.md)
+> - [One-Minute Playcast Demo Script](docs/submission/ONE_MINUTE_PLAYCAST_SCRIPT.md)
+> - [Gemini Integration Evidence](docs/submission/GEMINI_INTEGRATION_EVIDENCE.md)
+> - [Final Verification & Deployment Report](docs/submission/FINAL_VERIFICATION_AND_DEPLOYMENT_REPORT.md)
+
+---
+
 Foresight AI is a research-grade, **simulation-only** failure-prevention platform for a digital twin of an industrial electric motor. It runs a closed loop:
 
 **Observe → Predict → Diagnose → Simulate → Verify → Recommend → Monitor**
 
-Built for the **Meta Global AI Developer Hackathon 2026** (Indie / Push the Frontier). Meta Muse Spark powers the bounded diagnostic agent, either **Muse Spark 1.3** on the Meta Model API (`MODEL_API_KEY`) or the open-weights **Muse Spark Open** on Fireworks AI (`FIREWORKS_API_KEY`), selectable per run. With no key configured, a clearly labelled deterministic planner drives the same tools.
+It supports multi-provider diagnostic agents:
+1. **Google Gemini Operations Copilot (P0)**: Powered by `gemini-3.8-flash` via the official Google Gen AI SDK (`google-genai==3.3.0`). Features typed schema function calling across 6 deterministic tools, multi-turn state preservation, and zero-fabrication physics grounding.
+2. **Meta Muse Spark**: Supports **Muse Spark 1.3** on the Meta Model API (`MODEL_API_KEY`) and **Muse Spark Open** on Fireworks AI (`FIREWORKS_API_KEY`).
+3. **Deterministic Physics Planner**: Clearly labeled fallback when API keys are absent or rate-limited.
 
 > This system never connects to or controls real equipment. All telemetry is synthetic.
+
+## Hackathon Features Overview
+
+### 1. Gemini Operations Copilot (P0)
+* **SDK**: Built with the official `google-genai` Python SDK v3.3.0.
+* **Typed Tool Calling**: Strict schema definition across 6 deterministic tools (`get_machine_state`, `get_sensor_history`, `analyze_anomalies`, `predict_failure_risk`, `compare_futures`, `verify_intervention`).
+* **Zero Fabrication**: Gemini cannot synthesize sensor telemetry or bypass physics checks.
+* **Stateful Dialogue**: Preserves conversation history across multi-turn diagnostic steps.
+* **Economic Accounting**: Tracks token usage and financial cost ($0.075 input / $0.30 output per 1M tokens).
+
+### 2. Future Arena (P0)
+* **3-Way Counterfactual Simulation**: Clones the 15 kW motor digital twin across three futures under Common Random Numbers (CRN): *Continue Operating*, *Reduce Load*, and *Planned Maintenance*.
+* **Physics Grounding**: Reveals non-intuitive industrial dynamics—e.g., derating a constant-torque motor stalls fan cooling, accelerating thermal burnout.
+* **Unified Economics**: Explicit scoring across downtime penalties, replacement costs, and production loss.
+
+### 3. Safety Challenge & Verifier v5 (P0)
+* **Fail-Closed Physical Gate**: 13 deterministic physics checks block direct physical actuation.
+* **Independent Monte Carlo Re-Simulation**: Proposed actions undergo re-simulation on 32 fresh seeds (+900,000 offset).
+* **Judge-Facing Challenge Suite**: Injects adversarial actions (bearing derate trap, hallucinated sensor citations, delayed maintenance) and demonstrates sub-second rejection with explicit violated constraints.
+
+### 4. Multimodal Diagnostics & Tamper-Evident Decision Receipts (P1)
+* **Multimodal Thermography & Spectrograms**: Ingests infrared and acoustic vibration data with magic byte validation (`\xFF\xD8\xFF` JPEG, `\x89PNG` PNG).
+* **Decision Receipts**: Generates canonical SHA-256 JSON audit receipts proving input provenance, model versions, simulation estimates, safety checks, and human operator approval state.
 
 ## Why it is not a chatbot
 
 1. **Digital twin** with deterministic seeds and physics-inspired ODEs  
 2. **Calibrated ML** (Isolation Forest, change-points, multi-horizon XGBoost) trained on held-out seeds  
-3. **Future Branching** — counterfactual intervention rollouts with matched noise and an explicit objective  
-4. **Independent safety verifier** that can reject LLM or planner proposals  
+3. **Future Branching & Future Arena** — counterfactual intervention rollouts with matched noise and an explicit objective  
+4. **Independent safety verifier** that can reject LLM or planner proposals and blocks direct actuation  
 5. **Information gate** that holds a verified action when the risk rests on weak trend evidence and waiting is safe  
-6. **Bounded Meta agent** with typed tools; it cannot invent sensor readings or simulation results  
+6. **Bounded Gemini & Meta agents** with typed tools; they cannot invent sensor readings or simulation results  
+7. **Cryptographic Decision Receipts** with canonical SHA-256 integrity verification  
 
 ## How it works
 

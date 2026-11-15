@@ -33,9 +33,8 @@ def _actuators(stream: TelemetryStream) -> ActuatorSettings:
 def cooling_case(small_bundle_module):
     stream = TelemetryStream(canonical_episode(ScenarioId.COOLING_DEGRADATION))
     engine = RiskEngine(small_bundle_module)
-    for _ in range(100):
-        stream.advance(60)
-        assessment = engine.assess(list(stream.window))
+    stream.advance(100 * 60)
+    assessment = engine.assess(list(stream.window))
     est = estimate_state(list(stream.window)[-360:], _actuators(stream))
     comp = compare_futures(
         [

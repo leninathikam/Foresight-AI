@@ -267,4 +267,21 @@ TOOL_DEFINITIONS: list[dict] = [
             "required": ["action", "claimed_failure_mode", "cited_evidence_ids", "rationale"],
         },
     },
+    {
+        "type": "function",
+        "name": "generate_decision_receipt",
+        "description": "Export a cryptographically verifiable JSON decision receipt with input provenance, scenarios, safety results, and SHA-256 digest.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": ACTION_SCHEMA,
+                "claimed_failure_mode": {
+                    "type": "string",
+                    "enum": ["thermal", "bearing", "overload", "none", "unknown"],
+                },
+                "cited_evidence_ids": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["action", "claimed_failure_mode", "cited_evidence_ids"],
+        },
+    },
 ]

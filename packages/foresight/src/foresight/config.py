@@ -9,8 +9,26 @@ from typing import Literal
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ProviderName = Literal["meta", "fireworks"]
-PROVIDERS: tuple[ProviderName, ...] = ("meta", "fireworks")
+ProviderName = Literal[
+    "gemini-3.8-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash-lite",
+    "gemini",
+    "meta",
+    "fireworks",
+]
+PROVIDERS: tuple[ProviderName, ...] = (
+    "gemini-3.8-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+    "gemini-2.0-flash-lite",
+)
 REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 
 
@@ -45,7 +63,17 @@ class ProviderConfig:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    llm_provider: ProviderName = Field("meta", alias="FORESIGHT_LLM_PROVIDER")
+    llm_provider: ProviderName = Field("gemini-3.8-flash", alias="FORESIGHT_LLM_PROVIDER")
+
+    # Gemini (Google GenAI SDK)
+    gemini_api_key: SecretStr | None = Field(None, alias="GEMINI_API_KEY")
+    google_api_key: SecretStr | None = Field(None, alias="GOOGLE_API_KEY")
+    gemini_model: str = Field("gemini-3.8-flash", alias="FORESIGHT_GEMINI_MODEL")
+    gemini_price_input_per_m: float = Field(0.10, alias="FORESIGHT_GEMINI_PRICE_INPUT_PER_M")
+    gemini_price_cached_input_per_m: float = Field(
+        0.025, alias="FORESIGHT_GEMINI_PRICE_CACHED_INPUT_PER_M"
+    )
+    gemini_price_output_per_m: float = Field(0.40, alias="FORESIGHT_GEMINI_PRICE_OUTPUT_PER_M")
 
     model_api_key: SecretStr | None = Field(None, alias="MODEL_API_KEY")
     meta_api_base_url: str = Field("https://api.meta.ai/v1", alias="META_API_BASE_URL")
@@ -67,6 +95,8 @@ class Settings(BaseSettings):
     agent_timeout_s: float = Field(300.0, alias="FORESIGHT_AGENT_TIMEOUT_S", gt=0)
     cors_origins: str = Field("http://localhost:3000", alias="FORESIGHT_CORS_ORIGINS")
     default_sim_speed: float = Field(60.0, alias="FORESIGHT_SIM_SPEED", gt=0, le=1000)
+    alarm_prioritized_dispatch: bool = Field(True, alias="FORESIGHT_ALARM_PRIORITIZED_DISPATCH")
+    expanded_candidate_grid: bool = Field(False, alias="FORESIGHT_EXPANDED_CANDIDATE_GRID")
 
     # Pre-allocation budget reservation limits (USD). None disables the ceiling.
     llm_total_budget_usd: float | None = Field(10.0, alias="FORESIGHT_TOTAL_BUDGET_USD")
@@ -90,8 +120,73 @@ class Settings(BaseSettings):
             raise ValueError(f"FORESIGHT_REASONING_EFFORT must be one of {list(REASONING_EFFORTS)}")
         return v
 
-    def provider(self, name: ProviderName | None = None) -> ProviderConfig:
-        name = name or self.llm_provider
+    def _build_provider_config(self, name: str) -> ProviderConfig:
+        key = self.gemini_api_key or self.google_api_key
+        if name in ("gemini-3.8-flash", "gemini-2.5-flash", "gemini"):
+            return ProviderConfig(
+                name="gemini-3.8-flash",
+                label="Google Gemini 3.8 Flash",
+                trace_id="gemini",
+                base_url="https://generativelanguage.googleapis.com",
+                api_key=key,
+                model="gemini-3.8-flash",
+                price_input_per_m=0.10,
+                price_cached_input_per_m=0.025,
+                price_output_per_m=0.40,
+                efforts=REASONING_EFFORTS,
+            )
+        if name in ("gemini-2.0-flash", "gemini-flash"):
+            return ProviderConfig(
+                name="gemini-2.0-flash",
+                label="Google Gemini 2.0 Flash",
+                trace_id="gemini-2.0-flash",
+                base_url="https://generativelanguage.googleapis.com",
+                api_key=key,
+                model="gemini-2.0-flash",
+                price_input_per_m=0.10,
+                price_cached_input_per_m=0.025,
+                price_output_per_m=0.40,
+                efforts=REASONING_EFFORTS,
+            )
+        if name in ("gemini-1.5-pro", "gemini-2.5-pro", "gemini-pro"):
+            return ProviderConfig(
+                name="gemini-1.5-pro",
+                label="Google Gemini 1.5 Pro",
+                trace_id="gemini-1.5-pro",
+                base_url="https://generativelanguage.googleapis.com",
+                api_key=key,
+                model="gemini-1.5-pro",
+                price_input_per_m=1.25,
+                price_cached_input_per_m=0.3125,
+                price_output_per_m=5.00,
+                efforts=REASONING_EFFORTS,
+            )
+        if name in ("gemini-1.5-flash", "gemini-flash"):
+            return ProviderConfig(
+                name="gemini-1.5-flash",
+                label="Google Gemini 1.5 Flash",
+                trace_id="gemini-1.5-flash",
+                base_url="https://generativelanguage.googleapis.com",
+                api_key=key,
+                model="gemini-1.5-flash",
+                price_input_per_m=0.075,
+                price_cached_input_per_m=0.01875,
+                price_output_per_m=0.30,
+                efforts=REASONING_EFFORTS,
+            )
+        if name in ("gemini-2.0-flash-lite", "gemini-2.5-flash-lite", "gemini-flash-lite"):
+            return ProviderConfig(
+                name="gemini-2.0-flash-lite",
+                label="Google Gemini 2.0 Flash-Lite",
+                trace_id="gemini-2.0-flash-lite",
+                base_url="https://generativelanguage.googleapis.com",
+                api_key=key,
+                model="gemini-2.0-flash-lite",
+                price_input_per_m=0.075,
+                price_cached_input_per_m=0.020,
+                price_output_per_m=0.30,
+                efforts=REASONING_EFFORTS,
+            )
         if name == "meta":
             return ProviderConfig(
                 name="meta",
@@ -120,10 +215,13 @@ class Settings(BaseSettings):
                 price_input_per_m=self.fireworks_price_input_per_m,
                 price_cached_input_per_m=self.fireworks_price_cached_input_per_m,
                 price_output_per_m=self.fireworks_price_output_per_m,
-                # Muse Spark Open always reasons; "minimal" is not documented for it.
                 efforts=("low", "medium", "high", "xhigh"),
             )
         raise ValueError(f"Unknown provider {name!r}")
+
+    def provider(self, name: ProviderName | None = None) -> ProviderConfig:
+        name = name or self.llm_provider
+        return self._build_provider_config(name)
 
     @property
     def configured_providers(self) -> list[ProviderConfig]:

@@ -28,6 +28,7 @@ from foresight.branching import (
     compare_futures,
     estimate_state,
 )
+from foresight.branching.arena import FutureArenaComparison, run_future_arena
 from foresight.config import Settings
 from foresight.prediction import RiskAssessment, RiskBundle, RiskEngine
 from foresight.simulation import (
@@ -40,6 +41,13 @@ from foresight.simulation import (
 )
 from foresight.telemetry import TelemetryConfig, TelemetrySample, TelemetryStream, replay
 from foresight.verification import Proposal, VerificationResult, verify_independently
+from foresight.verification.challenge import (
+    SAFETY_CHALLENGES,
+    SafetyChallengeExecutionResult,
+    execute_safety_challenge,
+    list_safety_challenges,
+)
+from foresight.verification.receipt import DecisionReceipt, build_decision_receipt
 
 log = logging.getLogger("foresight.session")
 
@@ -534,6 +542,96 @@ class LiveSession:
                 "event": event.model_dump(),
                 "verification": verification.model_dump() if verification else None,
             }
+
+    async def run_arena(
+        self,
+        horizon_min: float = 180.0,
+        members: int = 8,
+        reduce_load_fraction: float = 0.30,
+        inspection_delay_min: float = 15.0,
+    ) -> FutureArenaComparison:
+        async with self._lock:
+            est = self.estimate()
+            assessment = self.assessment
+            oracle = self.stream.twin.clone()
+            arena = await asyncio.to_thread(
+                run_future_arena,
+                session_id=self.id,
+                t0_s=self.stream.t_s,
+                estimate=est,
+                assessment=assessment,
+                horizon_min=horizon_min,
+                members=members,
+                reduce_load_fraction=reduce_load_fraction,
+                inspection_delay_min=inspection_delay_min,
+                oracle_twin=oracle,
+            )
+            return arena
+
+    async def run_safety_challenge(self, challenge_id: str) -> SafetyChallengeExecutionResult:
+        async with self._lock:
+            est = self.estimate()
+            assessment = self.assessment
+            oracle = self.stream.twin.clone()
+            return await asyncio.to_thread(
+                execute_safety_challenge,
+                challenge_id,
+                session_id=self.id,
+                t0_s=self.stream.t_s,
+                estimate=est,
+                assessment=assessment,
+                oracle_twin=oracle,
+            )
+
+    async def generate_receipt(
+        self,
+        action: Action | None = None,
+        claimed_fault_mode: str = "unknown",
+        cited_evidence_ids: list[str] | None = None,
+        human_approved: bool = False,
+        operator_id: str | None = None,
+    ) -> DecisionReceipt:
+        async with self._lock:
+            target_action = action or ContinueOperation()
+            comp = None
+            for c in reversed(list(self.comparisons.values())):
+                if c.branch_for_action(target_action) is not None:
+                    comp = c
+                    break
+            c_mode = claimed_fault_mode.lower()
+            if "cool" in c_mode or "therm" in c_mode:
+                prop_mode = "thermal"
+            elif "bear" in c_mode or "vib" in c_mode:
+                prop_mode = "bearing"
+            elif "overload" in c_mode:
+                prop_mode = "overload"
+            elif "none" in c_mode or "healthy" in c_mode:
+                prop_mode = "none"
+            else:
+                prop_mode = "unknown"
+
+            proposal = Proposal(
+                action=target_action,
+                claimed_failure_mode=prop_mode,  # type: ignore[arg-type]
+                cited_evidence_ids=cited_evidence_ids or [],
+                source="user" if not human_approved else "agent",
+            )
+            verification = await self._verify(proposal, comp)
+            samples = list(self.stream.window)
+            return build_decision_receipt(
+                session_id=self.id,
+                action=ACTION_ADAPTER.dump_python(target_action, mode="json"),
+                claimed_fault_mode=claimed_fault_mode,
+                cited_evidence_ids=cited_evidence_ids or [],
+                verification=verification,
+                samples=samples,
+                assessment=self.assessment,
+                comparison=comp,
+                copilot_provider="google-gemini",
+                copilot_model=self.settings.gemini_model,
+                human_approved=human_approved,
+                operator_id=operator_id,
+            )
 
     def replay_check(self) -> dict:
         """Re-run the session from its seed and intervention log; compare fingerprints."""
