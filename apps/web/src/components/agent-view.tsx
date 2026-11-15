@@ -315,7 +315,13 @@ export function AgentView() {
                   options={providers.map((p) => p.name)}
                   value={provider}
                   onChange={chooseProvider}
-                  format={(n) => (n === "meta" ? "Meta · Muse Spark 1.3" : "Fireworks · Muse Spark Open")}
+                  format={(n) =>
+                    n === "gemini"
+                      ? "Google Gemini 2.5 Flash"
+                      : n === "meta"
+                        ? "Meta · Muse Spark 1.3"
+                        : "Fireworks · Muse Spark Open"
+                  }
                 />
                 <label className="flex items-center gap-2">
                   <Eyebrow>Effort</Eyebrow>

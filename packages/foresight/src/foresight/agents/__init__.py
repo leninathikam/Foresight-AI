@@ -5,6 +5,7 @@ from foresight.agents.budget import (
     calculate_actual_cost,
     estimate_call_cost,
 )
+from foresight.agents.gemini import GeminiModelClient
 from foresight.agents.llm import LLMError, MetaModelClient, ModelClient
 from foresight.agents.orchestrator import AgentOrchestrator
 from foresight.agents.schemas import AgentRecommendation, AgentStage, AgentTrace
@@ -18,6 +19,7 @@ __all__ = [
     "AgentTrace",
     "BudgetExceededError",
     "BudgetSummary",
+    "GeminiModelClient",
     "LLMBudgetManager",
     "LLMError",
     "MetaModelClient",

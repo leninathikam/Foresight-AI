@@ -12,6 +12,12 @@ from foresight.config import get_settings
 def client(monkeypatch, small_bundle):
     monkeypatch.delenv("MODEL_API_KEY", raising=False)
     monkeypatch.setenv("MODEL_API_KEY", "")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setenv("GOOGLE_API_KEY", "")
+    monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
+    monkeypatch.setenv("FIREWORKS_API_KEY", "")
     get_settings.cache_clear()
     import foresight_api.main as main
 

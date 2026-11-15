@@ -16,9 +16,8 @@ def cooling_case(request) -> EvalCase:
     bundle = request.getfixturevalue("small_bundle")
     stream = TelemetryStream(canonical_episode(ScenarioId.COOLING_DEGRADATION))
     engine = RiskEngine(bundle)
-    for _ in range(100):
-        stream.advance(60)
-        a = engine.assess(list(stream.window))
+    stream.advance(100 * 60)
+    a = engine.assess(list(stream.window))
     return EvalCase(
         ScenarioId.COOLING_DEGRADATION,
         "cooling@100",
@@ -35,9 +34,8 @@ def healthy_case(request) -> EvalCase:
     bundle = request.getfixturevalue("small_bundle")
     stream = TelemetryStream(canonical_episode(ScenarioId.HEALTHY))
     engine = RiskEngine(bundle)
-    for _ in range(100):
-        stream.advance(60)
-        a = engine.assess(list(stream.window))
+    stream.advance(100 * 60)
+    a = engine.assess(list(stream.window))
     return EvalCase(
         ScenarioId.HEALTHY, "healthy@100", stream.t_s, list(stream.window)[-720:], a, None, None
     )

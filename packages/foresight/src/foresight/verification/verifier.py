@@ -7,6 +7,7 @@ It never reads LLM free text as evidence. Any blocking check failure rejects the
 
 from __future__ import annotations
 
+import hashlib
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -93,6 +94,7 @@ class VerificationResult(BaseModel):
     rejection_reasons: list[str]
     comparison_id: str | None
     summary: str
+    decision_hash: str = Field(default="", description="Tamper-evident SHA-256 integrity hash")
 
 
 CONSEQUENTIAL = (ReduceLoad, ReduceSpeed, IncreaseCooling, ScheduleInspection, ControlledShutdown)
@@ -196,6 +198,7 @@ def independent_confirmation(
     proposer never saw removes that selection effect. Returns None when there is nothing to
     confirm (no simulated branch, continue_operation, or missing initial state).
     """
+    policy = policy or DEFAULT_POLICY
     if comparison is None or isinstance(action, ContinueOperation):
         return None
     if comparison.branch_for_action(action) is None:
@@ -489,6 +492,8 @@ def verify(
         summary = f"'{label}' passed all blocking checks" + (
             f" with {len(warnings)} warning(s)" if warnings else ""
         )
+    raw_digest = f"{verdict}|{label}|{now_s}|" + ";".join(f"{c.name}:{c.status}" for c in checks)
+    digest = hashlib.sha256(raw_digest.encode("utf-8")).hexdigest()
     return VerificationResult(
         verdict=verdict,
         action=ACTION_ADAPTER.dump_python(action, mode="json"),
@@ -498,6 +503,7 @@ def verify(
         rejection_reasons=[f"{c.name}: {c.detail}" for c in failures],
         comparison_id=comparison.id if comparison else None,
         summary=summary,
+        decision_hash=digest,
     )
 
 
@@ -513,6 +519,7 @@ def verify_independently(
     """Full verification: the proposer's comparison plus the verifier's own re-simulation.
 
     CPU-bound (one extra ensemble); call it via asyncio.to_thread from async code."""
+    policy = policy or DEFAULT_POLICY
     confirmation = independent_confirmation(
         proposal.action,
         comparison,
@@ -535,20 +542,31 @@ def _evidence_checks(
     proposal: Proposal, assessment: RiskAssessment | None, known_ids: set[str] | None
 ) -> list[CheckResult]:
     checks: list[CheckResult] = []
-    if known_ids is not None and proposal.cited_evidence_ids:
-        unknown = [e for e in proposal.cited_evidence_ids if e not in known_ids]
-        checks.append(
-            CheckResult(
-                name="evidence_exists",
-                status="fail" if unknown else "pass",
-                blocking=True,
-                detail=(
-                    f"Cited evidence not found in the evidence registry: {', '.join(unknown)}"
-                    if unknown
-                    else f"All {len(proposal.cited_evidence_ids)} cited evidence ids exist"
-                ),
+    consequential = isinstance(proposal.action, CONSEQUENTIAL)
+    if known_ids is not None:
+        if proposal.source == "agent" and consequential and not proposal.cited_evidence_ids:
+            checks.append(
+                CheckResult(
+                    name="evidence_exists",
+                    status="fail",
+                    blocking=True,
+                    detail="Consequential agent actions must cite valid evidence ids from the evidence registry (fail-closed)",
+                )
             )
-        )
+        elif proposal.cited_evidence_ids:
+            unknown = [e for e in proposal.cited_evidence_ids if e not in known_ids]
+            checks.append(
+                CheckResult(
+                    name="evidence_exists",
+                    status="fail" if unknown else "pass",
+                    blocking=True,
+                    detail=(
+                        f"Cited evidence not found in the evidence registry: {', '.join(unknown)}"
+                        if unknown
+                        else f"All {len(proposal.cited_evidence_ids)} cited evidence ids exist"
+                    ),
+                )
+            )
     if (
         assessment is None
         or not assessment.available

@@ -32,15 +32,30 @@ VERIFIER_VERSIONS: dict[str, dict] = {
         "strict_improvement": False,
         "max_branch_vibration_mm_s": DEFAULT_MOTOR.vibration_trip_mm_s,
         "inspection_before_earliest_failure": False,
+        "confirmation_members": 16,
+        "bearing_confirmation_members": 16,
     },
     "v2": {
         "block_no_benefit": True,
         "strict_improvement": False,
         "max_branch_vibration_mm_s": DEFAULT_MOTOR.vibration_trip_mm_s,
         "inspection_before_earliest_failure": False,
+        "confirmation_members": 16,
+        "bearing_confirmation_members": 16,
     },
-    "v3": {"inspection_before_earliest_failure": False},
-    "v4": {},
+    "v3": {
+        "inspection_before_earliest_failure": False,
+        "confirmation_members": 16,
+        "bearing_confirmation_members": 16,
+    },
+    "v4": {
+        "confirmation_members": 16,
+        "bearing_confirmation_members": 16,
+    },
+    "v5": {
+        "confirmation_members": 32,
+        "bearing_confirmation_members": 48,
+    },
 }
 
 

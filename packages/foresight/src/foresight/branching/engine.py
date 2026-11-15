@@ -260,10 +260,14 @@ def planning_twin_from_estimate(
         ambient_c=est.ambient_c,
         fault=fault,
     )
+    init_load_noise = jitter(0.0, 0.015, -0.05, 0.05)
+    init_amb_noise = jitter(0.0, 0.6, -2.5, 2.5)
+    init_temp = jitter(est.temperature_c, 0.8, 15.0, 160.0)
+    init_amb = est.ambient_c + init_amb_noise
     state = MotorState(
         t_s=t0,
-        temperature_c=est.temperature_c,
-        ambient_c=est.ambient_c,
+        temperature_c=init_temp,
+        ambient_c=init_amb,
         bearing_damage=damage,
         cooling_efficiency=eta,
         load_multiplier=est.actuators.load_multiplier,
@@ -271,6 +275,8 @@ def planning_twin_from_estimate(
         aux_boost=est.actuators.aux_boost,
         bearing_defect_active=fault.bearing_defect_onset_s is not None,
         cooling_fouling_active=fault.cooling_fouling_onset_s is not None,
+        load_noise=init_load_noise,
+        ambient_noise=init_amb_noise,
     )
     return MotorTwin(config, state=state)
 

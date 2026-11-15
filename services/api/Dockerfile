@@ -17,4 +17,4 @@ RUN uv sync --frozen --no-dev \
  && uv run python -c "from foresight.artifacts import load_or_train_bundle; load_or_train_bundle()"
 
 EXPOSE 8000
-CMD ["uv", "run", "uvicorn", "foresight_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "exec uv run uvicorn foresight_api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

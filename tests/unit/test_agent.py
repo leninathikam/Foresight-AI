@@ -25,9 +25,8 @@ def cooling_snapshot(request):
     bundle = request.getfixturevalue("small_bundle")
     stream = TelemetryStream(canonical_episode(ScenarioId.COOLING_DEGRADATION))
     engine = RiskEngine(bundle)
-    for _ in range(100):
-        stream.advance(60)
-        a = engine.assess(list(stream.window))
+    stream.advance(100 * 60)
+    a = engine.assess(list(stream.window))
     return AgentSnapshot("test", stream.t_s, list(stream.window)[-720:], ActuatorSettings(), a)
 
 

@@ -3,11 +3,17 @@ import type {
   BudgetSummary,
   AgentTrace,
   Diagnostics,
+  DecisionReceipt,
+  FutureArenaComparison,
   FutureComparison,
   Health,
+  MultimodalAnalysisResult,
+  PreloadedAsset,
   ProviderName,
   ReplayCheck,
   RiskAssessment,
+  SafetyChallengeDefinition,
+  SafetyChallengeExecutionResult,
   ScenarioId,
   ScenarioInfo,
   SessionSnapshot,
@@ -169,4 +175,40 @@ export const api = {
     request<ReplayCheck>(`/api/sessions/${id}/replay-check`, { timeoutMs: 120_000 }),
   budget: () => request<BudgetSummary>("/api/budget"),
   sessionBudget: (id: string) => request<BudgetSummary>(`/api/sessions/${id}/budget`),
+  arena: (
+    id: string,
+    opts?: {
+      horizon_min?: number;
+      members?: number;
+      reduce_load_fraction?: number;
+      inspection_delay_min?: number;
+    },
+  ) => post<FutureArenaComparison>(`/api/sessions/${id}/arena`, opts ?? {}),
+  safetyChallenges: () => request<SafetyChallengeDefinition[]>("/api/safety-challenge/catalog"),
+  runSafetyChallenge: (id: string, challengeId: string) =>
+    post<SafetyChallengeExecutionResult>(`/api/sessions/${id}/safety-challenge`, {
+      challenge_id: challengeId,
+    }),
+  generateReceipt: (
+    id: string,
+    opts?: {
+      action?: Action;
+      claimed_fault_mode?: string;
+      cited_evidence_ids?: string[];
+      human_approved?: boolean;
+      operator_id?: string;
+    },
+  ) => post<DecisionReceipt>(`/api/sessions/${id}/receipt`, opts ?? {}),
+  verifyReceipt: (receipt: Record<string, unknown>) =>
+    post<{ valid: boolean; recorded_digest: string; computed_digest: string; message: string }>(
+      "/api/receipt/verify",
+      { receipt },
+    ),
+  multimodalGallery: () => request<PreloadedAsset[]>("/api/evidence/multimodal/gallery"),
+  analyzeMultimodal: (body: {
+    asset_id?: string;
+    image_base64?: string;
+    mime_type?: string;
+    component?: string;
+  }) => post<MultimodalAnalysisResult>("/api/evidence/multimodal/analyze", body),
 };
